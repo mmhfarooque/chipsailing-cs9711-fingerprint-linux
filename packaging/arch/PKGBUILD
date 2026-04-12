@@ -1,15 +1,19 @@
 # Maintainer: Mahmud Farooque <farooque7@gmail.com>
 # Chipsailing CS9711 USB fingerprint scanner driver (USB ID: 2541:0236)
 # Patched libfprint with 1500ms retry delay for human-friendly scanning
+# Changelog: https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/blob/main/CHANGELOG.md
 
 pkgname=cs9711-fingerprint
-pkgver=1.0.0
+pkgver=1.2.0
 pkgrel=1
-pkgdesc="Chipsailing CS9711 USB fingerprint scanner driver with 1500ms retry patch"
+pkgdesc="Chipsailing CS9711 USB fingerprint scanner driver with 1500ms retry patch and GTK4 GUI manager"
 arch=('x86_64' 'aarch64')
 url="https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux"
 license=('LGPL-2.1-or-later' 'MIT')
 depends=('fprintd' 'libfprint' 'glib2' 'libgusb')
+optdepends=('python-gobject: GUI manager'
+            'gtk4: GUI manager'
+            'libadwaita: GUI manager')
 makedepends=('git' 'meson' 'ninja' 'pixman' 'cairo' 'openssl' 'opencv'
              'doctest' 'gobject-introspection')
 source=("git+https://github.com/archeYR/libfprint-CS9711.git")
@@ -48,9 +52,10 @@ package() {
 post_install() {
     ldconfig
     systemctl restart fprintd 2>/dev/null || true
-    echo ":: CS9711 fingerprint driver installed!"
+    echo ":: CS9711 fingerprint driver v${pkgver} installed!"
     echo ":: Enroll: fprintd-enroll (15 touches required)"
     echo ":: Test:   fprintd-verify"
+    echo ":: GUI:    python3 cs9711-manager.py (optional, needs python-gobject + gtk4 + libadwaita)"
 }
 
 post_upgrade() {

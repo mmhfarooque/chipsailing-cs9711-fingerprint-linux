@@ -24,6 +24,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DRIVER_DIR = os.path.join(SCRIPT_DIR, "libfprint-CS9711")
 CS9711_SRC = os.path.join(DRIVER_DIR, "libfprint", "drivers", "cs9711", "cs9711.c")
 
+def get_app_version():
+    """Read version from VERSION file."""
+    try:
+        with open(os.path.join(SCRIPT_DIR, "VERSION")) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return "dev"
+
+APP_VERSION = get_app_version()
+
 PAM_FILES = [
     "/etc/pam.d/common-auth",
     "/etc/pam.d/system-auth",
@@ -173,7 +183,7 @@ class CS9711ManagerApp(Adw.Application):
 class CS9711Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.set_title("CS9711 Fingerprint Manager")
+        self.set_title(f"CS9711 Fingerprint Manager v{APP_VERSION}")
         self.set_default_size(680, 780)
 
         # Enroll process tracking

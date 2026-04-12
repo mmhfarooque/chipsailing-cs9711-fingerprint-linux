@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        1.0.0
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -16,7 +16,7 @@ Requires:       fprintd fprintd-pam
 %description
 Patched libfprint with support for the Chipsailing CS9711 fingerprint
 scanner (USB ID: 2541:0236). Includes a 1500ms retry delay patch for
-human-friendly scanning.
+human-friendly scanning and a GTK4 GUI manager.
 
 Enables fingerprint login, lock screen unlock, and sudo authentication.
 Based on the archeYR/libfprint-CS9711 community driver.
@@ -63,6 +63,7 @@ echo ""
 echo "CS9711 fingerprint driver installed!"
 echo "  Enroll:  fprintd-enroll        (15 touches)"
 echo "  Test:    fprintd-verify"
+echo "  GUI:     python3 /path/to/cs9711-manager.py"
 
 %postun
 ldconfig
@@ -70,9 +71,20 @@ systemctl restart fprintd 2>/dev/null || true
 
 %files
 %license LICENSE
-%doc README.md
+%doc README.md CHANGELOG.md
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Sat Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.2.0-1
+- Add GTK4 GUI manager for scanner settings
+- Fix enrollment progress showing fprintd debug noise
+- Add retry feedback during enrollment (bad read, too short, not centered)
+- Fix uninstall.sh for multi-distro and multi-arch support
+- GLib callback pattern compliance
+- Add CHANGELOG.md and VERSION tracking
+
 * Sat Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.0.0-1
 - Initial package: CS9711 driver with 1500ms retry delay patch
+- Multi-distro installer (apt/dnf/pacman/zypper)
+- .deb, RPM, and Arch packaging
+- PAM configuration with 7 retries, 30s timeout

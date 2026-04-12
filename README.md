@@ -226,6 +226,8 @@ python3 helpers/set-empty-keyring-password.py
 │   └── arch/
 │       ├── build-arch.sh       # Build Arch package
 │       └── PKGBUILD
+├── VERSION                      # Current version number
+├── CHANGELOG.md                 # Version history and release notes
 ├── LICENSE
 └── README.md
 ```
@@ -256,6 +258,10 @@ lsusb | grep 2541                     # Check if scanner is connected
 
 - **Community driver:** [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) (maintained fork, originally by [ddlsmurf](https://github.com/ddlsmurf))
 - **Retry delay patch & Linux integration:** [mmhfarooque](https://github.com/mmhfarooque)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full version history and release notes.
 
 ## License
 

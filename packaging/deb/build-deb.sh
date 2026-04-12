@@ -17,7 +17,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DRIVER_DIR="$PROJECT_DIR/libfprint-CS9711"
-VERSION="1.0.0"
+VERSION=$(cat "$PROJECT_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || echo "1.2.0")
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
 
 case "$ARCH" in
@@ -87,6 +87,7 @@ find "$DRIVER_DIR/builddir/libfprint/" -name "libfprint-2.so*" -exec cp -P {} "$
 
 # Copy docs
 cp "$PROJECT_DIR/README.md" "$PKG_DIR/usr/share/doc/$PKG_NAME/"
+cp "$PROJECT_DIR/CHANGELOG.md" "$PKG_DIR/usr/share/doc/$PKG_NAME/" 2>/dev/null || true
 echo ""
 
 # ---- Step 3: Create debian control files ----
@@ -113,6 +114,9 @@ Description: Chipsailing CS9711 USB fingerprint scanner driver for Linux
  Enables fingerprint login, lock screen unlock, and sudo authentication.
  .
  Based on the archeYR/libfprint-CS9711 community driver.
+ .
+ Includes GTK4 GUI manager for scanner settings.
+ See CHANGELOG.md for version history.
 EOF
 
 # postinst — runs after install
