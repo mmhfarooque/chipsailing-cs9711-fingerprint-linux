@@ -41,9 +41,15 @@ case "$ARCH" in
     *)       LIB_ARCH="$ARCH-linux-gnu" ;;
 esac
 
+# Resolve real user (may be running under sudo/pkexec)
+REAL_USER="${SUDO_USER:-$(whoami)}"
+if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
+    REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+fi
+
 # Remove enrolled fingerprints
 echo "[1/4] Removing enrolled fingerprints..."
-fprintd-delete "$(whoami)" 2>/dev/null && echo "  Fingerprints deleted" || echo "  No fingerprints to delete"
+fprintd-delete "$REAL_USER" 2>/dev/null && echo "  Fingerprints deleted" || echo "  No fingerprints to delete"
 echo ""
 
 # Remove the patched library (check multiple possible locations)

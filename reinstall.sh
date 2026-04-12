@@ -33,12 +33,13 @@ if [ ! -f "$CS9711_SRC" ]; then
     exit 1
 fi
 
-# Verify patch is still applied
+# Verify retry delay patch is applied (preserve custom values from GUI)
 echo "[1/4] Checking patches..."
-if grep -q "CS9711_DEFAULT_RESET_SLEEP  1500" "$CS9711_SRC"; then
-    echo "  Retry delay patch OK"
+CURRENT_DELAY=$(grep -oP 'CS9711_DEFAULT_RESET_SLEEP\s+\K\d+' "$CS9711_SRC" 2>/dev/null || echo "")
+if [ -n "$CURRENT_DELAY" ] && [ "$CURRENT_DELAY" -ge 500 ]; then
+    echo "  Retry delay: ${CURRENT_DELAY}ms (preserved)"
 else
-    echo "  Re-applying retry delay patch..."
+    echo "  Re-applying retry delay patch (1500ms default)..."
     sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' "$CS9711_SRC"
 fi
 
@@ -79,10 +80,16 @@ echo "[4/4] Restarting fprintd..."
 sudo systemctl restart fprintd
 sleep 2
 
-if fprintd-list "$USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
+# Use SUDO_USER or PKEXEC_UID to find the real user when running via pkexec/sudo
+REAL_USER="${SUDO_USER:-${USER}}"
+if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
+    REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+fi
+
+if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
     echo ""
     echo "SUCCESS: CS9711 scanner working!"
-    fprintd-list "$USER" 2>&1 | sed 's/^/  /'
+    fprintd-list "$REAL_USER" 2>&1 | sed 's/^/  /'
 else
     echo ""
     echo "Scanner not detected. Try: lsusb | grep 2541"

@@ -310,9 +310,15 @@ echo "[6/7] Restarting fingerprint service..."
 sudo systemctl restart fprintd
 sleep 2
 
-if fprintd-list "$USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
+# Resolve real user (may be running under sudo/pkexec)
+REAL_USER="${SUDO_USER:-${USER}}"
+if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
+    REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+fi
+
+if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
     ok "CS9711 scanner detected by fprintd!"
-    fprintd-list "$USER" 2>&1 | sed 's/^/    /'
+    fprintd-list "$REAL_USER" 2>&1 | sed 's/^/    /'
 else
     warn "Scanner not yet detected by fprintd"
     echo "       Try: fprintd-list \$(whoami)"

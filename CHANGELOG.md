@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.1] - 2026-04-12
+
+### Fixed
+- **CRITICAL:** GUI custom retry delay was silently overwritten back to 1500ms by `reinstall.sh` — now preserves any custom value already set in source
+- **CRITICAL:** Keyring helper (`set-empty-keyring-password.py`) crashed when launched from GUI because `getpass` needs a terminal — now opens in a terminal emulator (ptyxis/gnome-terminal/konsole/xterm)
+- `$USER` resolved to "root" when scripts ran via pkexec from GUI, causing `fprintd-list` to check root's prints instead of the real user — all scripts now resolve the real user via `SUDO_USER`/`PKEXEC_UID`
+
+---
+
 ## [1.2.0] - 2026-04-12
 
 ### Fixed

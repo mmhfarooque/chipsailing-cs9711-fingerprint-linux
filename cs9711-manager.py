@@ -778,11 +778,28 @@ class CS9711Window(Adw.ApplicationWindow):
 
     def on_keyring(self, btn):
         helper = os.path.join(SCRIPT_DIR, "helpers", "set-empty-keyring-password.py")
-        if os.path.exists(helper):
-            subprocess.Popen(["python3", helper])
-            self.show_toast("Keyring helper launched in terminal — check your terminal")
-        else:
+        if not os.path.exists(helper):
             self.show_toast("Keyring helper not found")
+            return
+
+        # Needs a terminal for password input — try common terminal emulators
+        terminals = [
+            ["ptyxis", "--"],
+            ["gnome-terminal", "--"],
+            ["kgx", "--"],
+            ["konsole", "-e"],
+            ["xfce4-terminal", "-e"],
+            ["xterm", "-e"],
+        ]
+        cmd = ["python3", helper]
+        for term in terminals:
+            term_bin = term[0]
+            if subprocess.run(["which", term_bin], capture_output=True).returncode == 0:
+                subprocess.Popen(term + cmd)
+                self.show_toast(f"Keyring helper opened in {term_bin}")
+                return
+        # Fallback: tell user to run manually
+        self.show_toast("No terminal found — run manually: python3 helpers/set-empty-keyring-password.py")
 
     def _maintenance_done(self, btn, label, message, success):
         btn.set_sensitive(True)
