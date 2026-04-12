@@ -193,7 +193,7 @@ echo "============================================"
 echo ""
 
 # ---- Pre-flight checks ----
-echo "[0/7] Pre-flight checks..."
+echo "[0/8] Pre-flight checks..."
 
 if [ "$(id -u)" -eq 0 ]; then
     fail "Do not run as root. The script will use sudo when needed."
@@ -219,7 +219,7 @@ fi
 echo ""
 
 # ---- Step 1: Dependencies ----
-echo "[1/7] Installing build dependencies via $PKG_FAMILY..."
+echo "[1/8] Installing build dependencies via $PKG_FAMILY..."
 if ! declare -f "install_deps_$PKG_FAMILY" &>/dev/null; then
     fail "No installer defined for package manager: $PKG_FAMILY"
     exit 1
@@ -229,7 +229,7 @@ ok "Dependencies installed"
 echo ""
 
 # ---- Step 2: Clone or update source ----
-echo "[2/7] Fetching driver source..."
+echo "[2/8] Fetching driver source..."
 if [ -d "$DRIVER_DIR/.git" ]; then
     cd "$DRIVER_DIR"
     echo "  Existing repo found — pulling latest..."
@@ -251,7 +251,7 @@ git log --oneline -3 | sed 's/^/    /'
 echo ""
 
 # ---- Step 3: Apply retry delay patch ----
-echo "[3/7] Applying 1500ms retry delay patch..."
+echo "[3/8] Applying 1500ms retry delay patch..."
 CS9711_FILE="$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"
 
 if [ ! -f "$CS9711_FILE" ]; then
@@ -284,7 +284,7 @@ fi
 echo ""
 
 # ---- Step 4: Build ----
-echo "[4/7] Building driver (this may take a few minutes)..."
+echo "[4/8] Building driver (this may take a few minutes)..."
 cd "$DRIVER_DIR"
 rm -rf builddir
 meson setup builddir \
@@ -299,14 +299,14 @@ ok "Build complete"
 echo ""
 
 # ---- Step 5: Install ----
-echo "[5/7] Installing driver..."
+echo "[5/8] Installing driver..."
 sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
 ok "Library installed"
 echo ""
 
 # ---- Step 6: Restart fprintd and verify ----
-echo "[6/7] Restarting fingerprint service..."
+echo "[6/8] Restarting fingerprint service..."
 sudo systemctl restart fprintd
 sleep 2
 
@@ -327,8 +327,43 @@ fi
 echo ""
 
 # ---- Step 7: Configure PAM ----
-echo "[7/7] Configuring PAM for fingerprint auth..."
+echo "[7/8] Configuring PAM for fingerprint auth..."
 configure_pam
+echo ""
+
+# ---- Step 8: Install GUI Manager ----
+echo "[8/8] Installing GUI Manager..."
+
+# Install GTK4 Python deps
+if [ "$PKG_FAMILY" = "apt" ]; then
+    sudo apt install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 2>&1 | tail -2
+elif [ "$PKG_FAMILY" = "dnf" ]; then
+    sudo dnf install -y python3-gobject gtk4 libadwaita 2>&1 | tail -2
+elif [ "$PKG_FAMILY" = "pacman" ]; then
+    sudo pacman -S --needed --noconfirm python-gobject gtk4 libadwaita 2>&1 | tail -2
+elif [ "$PKG_FAMILY" = "zypper" ]; then
+    sudo zypper install -y python3-gobject typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 2>&1 | tail -2
+fi
+
+# Make GUI executable
+chmod +x "$SCRIPT_DIR/cs9711-manager.py" 2>/dev/null || true
+
+# Create desktop shortcut
+DESKTOP_FILE="$HOME/.local/share/applications/cs9711-manager.desktop"
+mkdir -p "$HOME/.local/share/applications"
+cat > "$DESKTOP_FILE" << DESKEOF
+[Desktop Entry]
+Type=Application
+Name=CS9711 Fingerprint Manager
+Comment=Configure Chipsailing CS9711 fingerprint scanner
+Exec=python3 $SCRIPT_DIR/cs9711-manager.py
+Icon=fingerprint-symbolic
+Terminal=false
+Categories=Settings;HardwareSettings;System;
+Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;
+DESKEOF
+
+ok "GUI Manager installed — search 'CS9711' or 'Fingerprint' in app launcher"
 echo ""
 
 # ---- Done ----
@@ -346,9 +381,8 @@ echo ""
 echo "    3. (Optional) Enroll more fingers:"
 echo "       fprintd-enroll -f left-index-finger"
 echo ""
-echo "    4. (Optional) Install the graphical manager:"
-echo "       ./setup-gui.sh"
-echo "       python3 cs9711-manager.py"
+echo "    4. Open the GUI Manager:"
+echo "       python3 $SCRIPT_DIR/cs9711-manager.py"
 echo "       Or search 'CS9711' in your app launcher."
 echo ""
 echo "  Troubleshooting:"
@@ -356,7 +390,4 @@ echo "    - 'No devices': check USB, run 'sudo ldconfig'"
 echo "    - 'verify-no-match': delete + re-enroll:"
 echo "        fprintd-delete \$(whoami) && fprintd-enroll"
 echo "    - After system update breaks it: run this script again"
-echo ""
-echo "  Optional — auto-unlock GNOME keyring on fingerprint login:"
-echo "    python3 helpers/set-empty-keyring-password.py"
 echo ""
