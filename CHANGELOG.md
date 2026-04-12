@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.2] - 2026-04-12
+
+### Fixed
+- **"Delete All" fingerprints failed** — `fprintd-delete` returned "AlreadyInUse" because the scanner device was still claimed from a recent operation (enrollment, verify, or status refresh). The error message was also blank because fprintd puts errors on stdout, not stderr. Now retries up to 3 times with a 1.5s pause between attempts, and shows the actual error message if all retries fail. Delete also runs in a background thread so the UI stays responsive.
+
+---
+
 ## [1.6.1] - 2026-04-12
 
 ### Fixed

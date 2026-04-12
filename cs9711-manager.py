@@ -556,13 +556,29 @@ class CS9711Window(Adw.ApplicationWindow):
     def _on_delete_confirmed(self, dialog, response):
         if response != "delete":
             return
-        user = os.environ.get("USER", "nobody")
-        rc, out, err = run_cmd(["fprintd-delete", user])
-        if rc == 0:
-            self.show_toast("All fingerprints deleted")
-        else:
-            self.show_toast(f"Delete failed: {err}")
-        self.refresh_all()
+        self.delete_btn.set_sensitive(False)
+
+        def do_delete():
+            user = os.environ.get("USER", "nobody")
+            # fprintd-delete can fail with "AlreadyInUse" if the device is still
+            # claimed from a recent operation. Retry up to 3 times with a pause.
+            for attempt in range(3):
+                rc, out, err = run_cmd(["fprintd-delete", user], timeout=10)
+                msg = err or out  # fprintd puts some errors on stdout
+                if rc == 0 or "AlreadyInUse" not in msg:
+                    break
+                time.sleep(1.5)
+            def _done():
+                self.delete_btn.set_sensitive(True)
+                if rc == 0:
+                    self.show_toast("All fingerprints deleted")
+                else:
+                    self.show_toast(f"Delete failed: {msg}")
+                self.refresh_all()
+                return False
+            GLib.idle_add(_done)
+
+        threading.Thread(target=do_delete, daemon=True).start()
 
     # ========================================================================
     # Scan Settings Section
