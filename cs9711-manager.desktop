@@ -5,7 +5,7 @@ Comment=Configure Chipsailing CS9711 fingerprint scanner
 # NOTE: This is a template. Run ./setup-gui.sh to install with the correct path.
 # Exec will be set to your actual clone location by setup-gui.sh
 Exec=python3 cs9711-manager.py
-Icon=fingerprint-symbolic
+Icon=auth-fingerprint-symbolic
 Terminal=false
 Categories=Settings;HardwareSettings;System;
 Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;
