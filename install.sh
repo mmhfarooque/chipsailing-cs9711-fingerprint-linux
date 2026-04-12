@@ -265,6 +265,18 @@ else
     fail "CS9711_DEFAULT_RESET_SLEEP not found — check driver version"
     exit 1
 fi
+
+# Make doctest optional (only needed for tests, not the driver itself)
+SIGFM_MESON="$DRIVER_DIR/libfprint/sigfm/meson.build"
+if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
+    sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" "$SIGFM_MESON"
+    # Wrap test executable in if-block if not already
+    if ! grep -q "if doctest.found()" "$SIGFM_MESON"; then
+        sed -i '/^sigfm_tests/i if doctest.found()' "$SIGFM_MESON"
+        echo "endif" >> "$SIGFM_MESON"
+    fi
+    ok "Made doctest optional (not needed for driver)"
+fi
 echo ""
 
 # ---- Step 4: Build ----

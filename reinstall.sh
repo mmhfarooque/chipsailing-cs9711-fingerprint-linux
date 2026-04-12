@@ -23,13 +23,24 @@ if [ ! -d "$DRIVER_DIR/libfprint/drivers/cs9711" ]; then
 fi
 
 # Verify patch is still applied
-echo "[1/4] Checking 1500ms retry patch..."
+echo "[1/4] Checking patches..."
 if grep -q "CS9711_DEFAULT_RESET_SLEEP  1500" "$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"; then
-    echo "  Patch OK"
+    echo "  Retry delay patch OK"
 else
-    echo "  Re-applying patch..."
+    echo "  Re-applying retry delay patch..."
     sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' \
         "$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"
+fi
+
+# Make doctest optional
+SIGFM_MESON="$DRIVER_DIR/libfprint/sigfm/meson.build"
+if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
+    sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" "$SIGFM_MESON"
+    if ! grep -q "if doctest.found()" "$SIGFM_MESON"; then
+        sed -i '/^sigfm_tests/i if doctest.found()' "$SIGFM_MESON"
+        echo "endif" >> "$SIGFM_MESON"
+    fi
+    echo "  Made doctest optional"
 fi
 echo ""
 

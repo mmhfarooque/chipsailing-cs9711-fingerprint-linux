@@ -29,6 +29,11 @@ fi
 cd libfprint-CS9711
 sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' \
     libfprint/drivers/cs9711/cs9711.c
+# Make doctest optional (only needed for tests)
+sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" \
+    libfprint/sigfm/meson.build
+sed -i '/^sigfm_tests/i if doctest.found()' libfprint/sigfm/meson.build
+echo "endif" >> libfprint/sigfm/meson.build
 
 %build
 cd libfprint-CS9711

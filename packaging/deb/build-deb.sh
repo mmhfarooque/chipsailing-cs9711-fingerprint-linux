@@ -50,6 +50,16 @@ if ! grep -q "CS9711_DEFAULT_RESET_SLEEP  1500" "$CS9711_FILE"; then
     sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' "$CS9711_FILE"
 fi
 
+# Make doctest optional (only needed for tests, not the driver)
+SIGFM_MESON="$DRIVER_DIR/libfprint/sigfm/meson.build"
+if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
+    sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" "$SIGFM_MESON"
+    if ! grep -q "if doctest.found()" "$SIGFM_MESON"; then
+        sed -i '/^sigfm_tests/i if doctest.found()' "$SIGFM_MESON"
+        echo "endif" >> "$SIGFM_MESON"
+    fi
+fi
+
 cd "$DRIVER_DIR"
 rm -rf builddir
 meson setup builddir \
