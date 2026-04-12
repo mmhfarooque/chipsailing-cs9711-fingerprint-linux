@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CS9711 Fingerprint Manager
+Comment=Configure Chipsailing CS9711 fingerprint scanner settings
+Exec=python3 /opt/cs9711-fingerprint/cs9711-manager.py
+Icon=fingerprint-symbolic
+Terminal=false
+Categories=Settings;HardwareSettings;System;
+Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;

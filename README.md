@@ -148,6 +148,28 @@ sudo authselect enable-feature with-fingerprint
 - Login screen fingerprint auth
 - All via `libpam-fprintd`
 
+## GUI Manager
+
+A GTK4 graphical manager is included for easy configuration:
+
+```bash
+./setup-gui.sh       # Install GUI dependencies + desktop shortcut
+python3 cs9711-manager.py   # Launch
+```
+
+Or search **"CS9711"** or **"Fingerprint Manager"** in your app launcher after setup.
+
+The GUI lets you:
+- View scanner status and enrolled fingers
+- Enroll/delete/verify fingerprints with visual progress
+- Adjust retry delay (250ms–3000ms slider)
+- Set PAM max attempts and timeout
+- View which auth locations use fingerprint
+- Rebuild/install/uninstall the driver
+- Configure GNOME Keyring auto-unlock
+
+![screenshot](https://img.shields.io/badge/GTK4-libadwaita-blue?style=flat-square)
+
 ## Optional: Auto-Unlock GNOME Keyring
 
 By default, GNOME Keyring requires your password to unlock (fingerprint login skips it). To set an empty keyring password so it auto-unlocks:
@@ -163,6 +185,9 @@ python3 helpers/set-empty-keyring-password.py
 ├── install.sh                   # Universal installer (auto-detects distro)
 ├── reinstall.sh                 # Quick rebuild (after system updates)
 ├── uninstall.sh                 # Remove driver, restore stock libfprint
+├── cs9711-manager.py            # GTK4 GUI manager
+├── setup-gui.sh                 # GUI dependency installer + desktop shortcut
+├── cs9711-manager.desktop       # Desktop entry template
 ├── patches/
 │   └── cs9711-retry-delay-1500ms.patch
 ├── helpers/
