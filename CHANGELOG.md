@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.1] - 2026-04-12
+
+### Fixed
+- **Double password prompt on first enrollment** — `fprintd-delete` was called before every enrollment, even the first time when no fingers exist. Both `fprintd-delete` and `fprintd-enroll` trigger polkit authentication, so users saw two back-to-back password dialogs on first use. Now only deletes if the specific finger is already enrolled — single password prompt on first enrollment.
+
+---
+
 ## [1.6.0] - 2026-04-12
 
 ### Security
