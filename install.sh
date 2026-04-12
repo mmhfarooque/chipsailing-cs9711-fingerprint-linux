@@ -387,3 +387,6 @@ if [ -f "$SCRIPT_DIR/cs9711-manager.py" ]; then
     nohup python3 "$SCRIPT_DIR/cs9711-manager.py" >/dev/null 2>&1 &
     disown
 fi
+
+# Move terminal back to home so the project folder isn't "in use"
+cd "$HOME"
