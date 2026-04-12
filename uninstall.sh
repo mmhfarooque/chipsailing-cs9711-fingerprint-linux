@@ -6,9 +6,16 @@
 
 set -e
 
+# Logging — same log file as the GUI
+LOG_DIR="$HOME/.local/share/cs9711-manager"
+LOG_FILE="$LOG_DIR/cs9711.log"
+mkdir -p "$LOG_DIR"
+logmsg() { echo "$(date '+%Y-%m-%d %H:%M:%S') [UNINSTALL] $1" >> "$LOG_FILE"; }
+
 echo ""
 echo "=== CS9711 Fingerprint Driver — Uninstall ==="
 echo ""
+logmsg "=== CLI UNINSTALL STARTING ==="
 
 # Detect distro
 if [ -f /etc/os-release ]; then

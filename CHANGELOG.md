@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.7.0] - 2026-04-12
+
+### Added
+- **Comprehensive activity logging** — every user action, system command, and result is logged to `~/.local/share/cs9711-manager/cs9711.log`. Includes GUI events, fprintd operations, pkexec auth, install/uninstall steps, and errors. Log file auto-rotates at 1MB (keeps 3 backups).
+- **In-GUI log viewer** — "View Log" button in the Diagnostics section opens a scrollable, read-only text view of the log. Includes a "Copy to clipboard" button for easy bug reporting.
+- **Clear Log button** — resets the log for fresh debugging sessions.
+- **Install/uninstall script logging** — `install.sh` and `uninstall.sh` also write to the same log file, creating a complete timeline from install through usage to uninstall.
+
+---
+
 ## [1.6.2] - 2026-04-12
 
 ### Fixed

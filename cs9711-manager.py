@@ -7,6 +7,7 @@ driver maintenance. Uses GTK4 + libadwaita for native GNOME look.
 """
 
 import gi
+import logging
 import os
 import re
 import shlex
@@ -26,6 +27,31 @@ USB_ID = "2541:0236"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DRIVER_DIR = os.path.join(SCRIPT_DIR, "libfprint-CS9711")
 CS9711_SRC = os.path.join(DRIVER_DIR, "libfprint", "drivers", "cs9711", "cs9711.c")
+
+# ============================================================================
+# Logging — all events written to ~/.local/share/cs9711-manager/cs9711.log
+# ============================================================================
+
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "cs9711-manager")
+LOG_FILE = os.path.join(LOG_DIR, "cs9711.log")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+log = logging.getLogger("cs9711")
+log.setLevel(logging.DEBUG)
+
+# File handler — keeps last 3 logs, 1MB each
+from logging.handlers import RotatingFileHandler
+_fh = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3)
+_fh.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+))
+log.addHandler(_fh)
+
+# Also log to stderr for terminal debugging
+_sh = logging.StreamHandler()
+_sh.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+_sh.setLevel(logging.INFO)
+log.addHandler(_sh)
 
 def get_app_version():
     """Read version from VERSION file."""
@@ -66,24 +92,38 @@ FINGER_NAMES = {fid: fname for fid, fname in FINGERS}
 
 def run_cmd(cmd, timeout=10):
     """Run a command and return (returncode, stdout, stderr)."""
+    cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+    log.debug(f"CMD: {cmd_str} (timeout={timeout}s)")
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout
         )
+        if r.returncode != 0:
+            log.warning(f"CMD FAILED (rc={r.returncode}): {cmd_str} | stdout={r.stdout.strip()!r} | stderr={r.stderr.strip()!r}")
+        else:
+            log.debug(f"CMD OK: {cmd_str}")
         return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        return 1, "", str(e)
+    except subprocess.TimeoutExpired:
+        log.error(f"CMD TIMEOUT ({timeout}s): {cmd_str}")
+        return 1, "", f"Command timed out after {timeout}s"
+    except FileNotFoundError:
+        log.error(f"CMD NOT FOUND: {cmd_str}")
+        return 1, "", f"Command not found: {cmd[0]}"
 
 
 def is_scanner_connected():
     rc, out, _ = run_cmd(["lsusb"])
-    return USB_ID in out if rc == 0 else False
+    connected = USB_ID in out if rc == 0 else False
+    log.debug(f"Scanner connected: {connected}")
+    return connected
 
 
 def is_driver_installed():
     rc, out, err = run_cmd(["fprintd-list", os.environ.get("USER", "nobody")])
     combined = f"{out} {err}".lower()
-    return "cs9711" in combined or "9711" in combined or "chipsailing" in combined
+    installed = "cs9711" in combined or "9711" in combined or "chipsailing" in combined
+    log.debug(f"Driver installed: {installed}")
+    return installed
 
 
 def get_enrolled_fingers():
@@ -184,8 +224,13 @@ class CS9711ManagerApp(Adw.Application):
     def on_activate(self, app):
         # Single instance — if window exists, just bring it to front
         if self.win is not None:
+            log.info("Window already open — bringing to front")
             self.win.present()
             return
+        log.info(f"=== CS9711 Fingerprint Manager v{APP_VERSION} starting ===")
+        log.info(f"User: {os.environ.get('USER', 'unknown')} | PID: {os.getpid()}")
+        log.info(f"Script dir: {SCRIPT_DIR}")
+        log.info(f"Log file: {LOG_FILE}")
         self.win = CS9711Window(application=app)
         self.win.present()
 
@@ -245,6 +290,7 @@ class CS9711Window(Adw.ApplicationWindow):
 
     def _check_first_launch(self):
         """Show enrollment prompt if no fingers enrolled."""
+        log.info("First launch check: no fingers enrolled, scanner connected — showing welcome dialog")
         if not self._has_enrolled_fingers and is_scanner_connected():
             dialog = Adw.AlertDialog(
                 heading="Welcome! Let's set up your fingerprint",
@@ -265,6 +311,7 @@ class CS9711Window(Adw.ApplicationWindow):
         return False  # don't repeat
 
     def _on_first_launch_response(self, dialog, response):
+        log.info(f"Welcome dialog response: {response}")
         if response == "enroll":
             self._start_enroll()
 
@@ -353,6 +400,7 @@ class CS9711Window(Adw.ApplicationWindow):
 
     def on_enroll_clicked(self, btn):
         """Handle enroll button — confirm re-enroll if fingers already exist."""
+        log.info(f"User clicked Enroll (has_enrolled={self._has_enrolled_fingers})")
         if self._has_enrolled_fingers:
             dialog = Adw.AlertDialog(
                 heading="Fingerprints already enrolled",
@@ -368,6 +416,7 @@ class CS9711Window(Adw.ApplicationWindow):
             self._start_enroll()
 
     def _on_reenroll_confirmed(self, dialog, response):
+        log.info(f"Re-enroll dialog response: {response}")
         if response == "add":
             self._start_enroll()
 
@@ -376,6 +425,7 @@ class CS9711Window(Adw.ApplicationWindow):
         finger_id = FINGERS[idx][0]
         finger_name = FINGERS[idx][1]
 
+        log.info(f"Starting enrollment: finger={finger_id} ({finger_name})")
         self.enroll_progress.set_visible(True)
         self.enroll_progress.set_fraction(0)
         self.enroll_progress.set_text(f"Preparing {finger_name}...")
@@ -389,11 +439,15 @@ class CS9711Window(Adw.ApplicationWindow):
                 # (avoids a second unnecessary polkit password prompt on first enrollment)
                 enrolled = get_enrolled_fingers()
                 if finger_id in enrolled:
+                    log.info(f"Finger {finger_id} already enrolled — deleting before re-enroll")
                     run_cmd(["fprintd-delete", os.environ.get("USER", "nobody"), finger_id], timeout=5)
+                else:
+                    log.debug(f"Finger {finger_id} not enrolled — skipping delete")
 
                 self._enroll_progress_text = f"Enrolling {finger_name}... Touch the scanner NOW"
                 GLib.idle_add(lambda: (self.enroll_progress.set_text(self._enroll_progress_text), False)[-1])
 
+                log.info(f"Launching fprintd-enroll -f {finger_id} (polkit auth expected)")
                 self._enroll_process = subprocess.Popen(
                     ["fprintd-enroll", "-f", finger_id],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
@@ -408,6 +462,7 @@ class CS9711Window(Adw.ApplicationWindow):
                     low = line.lower()
                     if "enroll-stage-passed" in low or "stage passed" in low:
                         touch_count += 1
+                        log.info(f"Enroll touch {touch_count}/15 accepted")
                         frac = min(touch_count / 15.0, 1.0)
                         GLib.idle_add(
                             self._enroll_update,
@@ -466,6 +521,7 @@ class CS9711Window(Adw.ApplicationWindow):
         return False
 
     def _enroll_done(self, message, success):
+        log.info(f"Enrollment finished: success={success} message={message!r}")
         self.enroll_progress.set_fraction(1.0 if success else 0)
         self.enroll_btn.set_sensitive(True)
         self.cancel_enroll_btn.set_visible(False)
@@ -509,6 +565,7 @@ class CS9711Window(Adw.ApplicationWindow):
         return False
 
     def on_cancel_enroll(self, btn):
+        log.info("User cancelled enrollment")
         self._enroll_cancel = True
         if self._enroll_process:
             try:
@@ -517,6 +574,7 @@ class CS9711Window(Adw.ApplicationWindow):
                 pass
 
     def on_verify(self, btn):
+        log.info("User clicked Test Verify")
         self.enroll_progress.set_visible(True)
         self.enroll_progress.set_fraction(0)
         self.enroll_progress.set_text("Touch the scanner to verify...")
@@ -536,6 +594,7 @@ class CS9711Window(Adw.ApplicationWindow):
         threading.Thread(target=do_verify, daemon=True).start()
 
     def _verify_done(self, message, success):
+        log.info(f"Verify result: success={success} message={message!r}")
         self.enroll_progress.set_text(message)
         self.enroll_progress.set_fraction(1.0 if success else 0)
         self.verify_btn.set_sensitive(True)
@@ -543,6 +602,7 @@ class CS9711Window(Adw.ApplicationWindow):
         return False
 
     def on_delete_fingers(self, btn):
+        log.info("User clicked Delete All")
         dialog = Adw.AlertDialog(
             heading="Delete all fingerprints?",
             body="You will need to re-enroll after deletion.",
@@ -560,6 +620,7 @@ class CS9711Window(Adw.ApplicationWindow):
 
         def do_delete():
             user = os.environ.get("USER", "nobody")
+            log.info(f"Delete confirmed — deleting all fingerprints for {user}")
             # fprintd-delete can fail with "AlreadyInUse" if the device is still
             # claimed from a recent operation. Retry up to 3 times with a pause.
             for attempt in range(3):
@@ -567,6 +628,7 @@ class CS9711Window(Adw.ApplicationWindow):
                 msg = err or out  # fprintd puts some errors on stdout
                 if rc == 0 or "AlreadyInUse" not in msg:
                     break
+                log.warning(f"Delete attempt {attempt + 1}/3 got AlreadyInUse — retrying in 1.5s")
                 time.sleep(1.5)
             def _done():
                 self.delete_btn.set_sensitive(True)
@@ -723,6 +785,7 @@ class CS9711Window(Adw.ApplicationWindow):
     def on_apply_pam(self, btn):
         max_tries = int(self.tries_adj.get_value())
         timeout = int(self.timeout_adj.get_value())
+        log.info(f"User clicked Apply PAM: max_tries={max_tries} timeout={timeout}")
 
         btn.set_sensitive(False)
         btn.set_label("Applying...")
@@ -845,7 +908,29 @@ class CS9711Window(Adw.ApplicationWindow):
         keyring_row.add_suffix(keyring_btn)
         group.add(keyring_row)
 
+        # Log viewer
+        log_group = Adw.PreferencesGroup(title="Diagnostics",
+                                          description=f"Log: {LOG_FILE}")
+        parent.append(log_group)
+
+        log_row = Adw.ActionRow(
+            title="Activity Log",
+            subtitle="View all events for troubleshooting",
+        )
+        log_row.add_prefix(Gtk.Image.new_from_icon_name("document-open-symbolic"))
+        log_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
+                              valign=Gtk.Align.CENTER)
+        view_log_btn = Gtk.Button(label="View Log")
+        view_log_btn.connect("clicked", self.on_view_log)
+        log_btn_box.append(view_log_btn)
+        clear_log_btn = Gtk.Button(label="Clear Log", css_classes=["destructive-action"])
+        clear_log_btn.connect("clicked", self.on_clear_log)
+        log_btn_box.append(clear_log_btn)
+        log_row.add_suffix(log_btn_box)
+        log_group.add(log_row)
+
     def on_rebuild_driver(self, btn):
+        log.info("User clicked Rebuild Driver")
         btn.set_sensitive(False)
         btn.set_label("Rebuilding...")
         self.show_toast("Rebuilding driver — this may take a minute...")
@@ -861,6 +946,7 @@ class CS9711Window(Adw.ApplicationWindow):
         threading.Thread(target=do_rebuild, daemon=True).start()
 
     def on_full_install(self, btn):
+        log.info("User clicked Full Install")
         btn.set_sensitive(False)
         btn.set_label("Installing...")
         self.show_toast("Running full install — this may take several minutes...")
@@ -876,6 +962,7 @@ class CS9711Window(Adw.ApplicationWindow):
         threading.Thread(target=do_install, daemon=True).start()
 
     def on_uninstall(self, btn):
+        log.info("User clicked Uninstall Everything")
         dialog = Adw.AlertDialog(
             heading="Uninstall everything?",
             body="This will completely remove:\n\n"
@@ -892,9 +979,11 @@ class CS9711Window(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _on_uninstall_confirmed(self, dialog, response):
+        log.info(f"Uninstall dialog response: {response}")
         if response != "uninstall":
             return
 
+        log.info("=== UNINSTALL STARTING ===")
         project_dir = SCRIPT_DIR
         desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
         user = os.environ.get("USER", "nobody")
@@ -911,6 +1000,7 @@ class CS9711Window(Adw.ApplicationWindow):
                 return False
 
             GLib.idle_add(_update, 0.1, "Step 1/5 — Removing fingerprints...")
+            log.info("Uninstall step 1/5: writing temp script")
 
             # Step 1: Write uninstall commands to a secure temp script
             fd, tmp_script = tempfile.mkstemp(prefix="cs9711-uninstall-", suffix=".sh")
@@ -944,6 +1034,7 @@ class CS9711Window(Adw.ApplicationWindow):
                 os.chmod(tmp_script, 0o700)
 
                 GLib.idle_add(_update, 0.3, "Step 2/5 — Removing driver (enter password)...")
+                log.info("Uninstall step 2/5: running pkexec (password prompt expected)")
 
                 # Step 2: Run via pkexec
                 rc, out, err = run_cmd(["pkexec", tmp_script], timeout=120)
@@ -954,7 +1045,9 @@ class CS9711Window(Adw.ApplicationWindow):
                     pass
 
             # Abort if user cancelled pkexec or script failed
+            log.info(f"Uninstall pkexec result: rc={rc}")
             if rc != 0:
+                log.warning("Uninstall aborted — pkexec cancelled or failed")
                 def _aborted():
                     self.uninstall_progress.set_fraction(0)
                     self.uninstall_progress.set_text("Uninstall cancelled — no changes made")
@@ -987,6 +1080,7 @@ class CS9711Window(Adw.ApplicationWindow):
             os.chmod(cleanup_script, 0o700)
 
             # Launch cleanup and close GUI
+            log.info(f"Uninstall step 5/5: launching cleanup script, GUI closing in 3s")
             subprocess.Popen([cleanup_script])
             def _done():
                 self.uninstall_progress.set_fraction(1.0)
@@ -1022,6 +1116,72 @@ class CS9711Window(Adw.ApplicationWindow):
                 return
         # Fallback: tell user to run manually
         self.show_toast("No terminal found — run manually: python3 helpers/set-empty-keyring-password.py")
+
+    def on_view_log(self, btn):
+        log.info("User opened log viewer")
+        try:
+            with open(LOG_FILE) as f:
+                content = f.read()
+        except FileNotFoundError:
+            content = "(No log file yet)"
+
+        # Build a scrollable text window
+        dialog = Adw.Dialog()
+        dialog.set_title("Activity Log")
+        dialog.set_content_width(750)
+        dialog.set_content_height(500)
+
+        toolbar_view = Adw.ToolbarView()
+        dialog.set_child(toolbar_view)
+
+        header = Adw.HeaderBar()
+        # Copy to clipboard button
+        copy_btn = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy log to clipboard")
+        header.pack_end(copy_btn)
+        toolbar_view.add_top_bar(header)
+
+        scroll = Gtk.ScrolledWindow(vexpand=True)
+        text_view = Gtk.TextView(editable=False, monospace=True,
+                                  wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                  top_margin=8, bottom_margin=8,
+                                  left_margin=8, right_margin=8)
+        text_view.get_buffer().set_text(content)
+        scroll.set_child(text_view)
+        toolbar_view.set_content(scroll)
+
+        # Scroll to bottom
+        def _scroll_to_end(*args):
+            adj = scroll.get_vadjustment()
+            adj.set_value(adj.get_upper())
+            return False
+        GLib.idle_add(_scroll_to_end)
+
+        def _copy(*args):
+            clipboard = self.get_clipboard()
+            clipboard.set(content)
+            self.show_toast("Log copied to clipboard")
+        copy_btn.connect("clicked", _copy)
+
+        dialog.present(self)
+
+    def on_clear_log(self, btn):
+        log.info("User cleared log")
+        # Close and reopen the file handler to truncate
+        for handler in log.handlers:
+            if isinstance(handler, RotatingFileHandler):
+                handler.close()
+                log.removeHandler(handler)
+        # Truncate the log file
+        with open(LOG_FILE, "w") as f:
+            f.write("")
+        # Re-add the handler
+        fh = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        log.addHandler(fh)
+        log.info(f"=== Log cleared — CS9711 Fingerprint Manager v{APP_VERSION} ===")
+        self.show_toast("Log cleared")
 
     def _maintenance_done(self, btn, label, message, success):
         btn.set_sensitive(True)

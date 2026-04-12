@@ -18,16 +18,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRIVER_DIR="$SCRIPT_DIR/libfprint-CS9711"
 REPO_URL="https://github.com/archeYR/libfprint-CS9711.git"
 
+# Logging — same log file as the GUI
+LOG_DIR="$HOME/.local/share/cs9711-manager"
+LOG_FILE="$LOG_DIR/cs9711.log"
+mkdir -p "$LOG_DIR"
+logmsg() { echo "$(date '+%Y-%m-%d %H:%M:%S') [INSTALL] $1" >> "$LOG_FILE"; }
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-ok()   { echo -e "  ${GREEN}[OK]${NC} $1"; }
-warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; }
-fail() { echo -e "  ${RED}[FAIL]${NC} $1"; }
-info() { echo -e "  ${BLUE}[>>]${NC} $1"; }
+ok()   { echo -e "  ${GREEN}[OK]${NC} $1"; logmsg "OK: $1"; }
+warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; logmsg "WARN: $1"; }
+fail() { echo -e "  ${RED}[FAIL]${NC} $1"; logmsg "FAIL: $1"; }
+info() { echo -e "  ${BLUE}[>>]${NC} $1"; logmsg "INFO: $1"; }
 
 # ============================================================================
 # Detect distro family
@@ -191,6 +197,8 @@ echo "  Chipsailing CS9711 Fingerprint Installer"
 echo "  USB ID: 2541:0236"
 echo "============================================"
 echo ""
+logmsg "=== INSTALL STARTING === ($(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 'unknown'))"
+logmsg "User: $(whoami) | Distro: $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"')"
 
 # ---- Pre-flight checks ----
 echo "[0/8] Pre-flight checks..."
@@ -367,6 +375,7 @@ Categories=Settings;HardwareSettings;System;
 Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;" > "$DESKTOP_FILE"
 
 ok "GUI Manager installed — search 'CS9711' or 'Fingerprint' in app launcher"
+logmsg "=== INSTALL COMPLETE ==="
 echo ""
 
 # ---- Done ----
