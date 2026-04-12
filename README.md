@@ -20,6 +20,17 @@ To check if you have this device:
 lsusb | grep 2541:0236
 ```
 
+### Important: USB Connection Requirement
+
+If your fingerprint scanner is plugged into a **keyboard's USB passthrough port** (e.g. Royal Kludge RK84, or any keyboard with a USB-A port on it):
+
+- **Wired (USB-C cable):** The scanner **WILL work**. The keyboard's USB passthrough hub is powered and active when connected via cable to the PC.
+- **Bluetooth / 2.4GHz wireless:** The scanner **WILL NOT work**. When the keyboard is connected wirelessly, the USB passthrough hub has no data connection to the PC — the scanner gets power but cannot communicate.
+
+**Fix:** Connect your keyboard to the PC with a USB cable. The scanner plugged into the keyboard's USB-A port will then be detected.
+
+This is a hardware limitation of keyboard USB passthrough — it only works when the keyboard itself is wired. This applies to **any** USB device plugged into a keyboard passthrough port, not just fingerprint scanners.
+
 ## Supported Distros
 
 | Distro Family | Tested On | Package Manager |
@@ -239,7 +250,7 @@ python3 helpers/set-empty-keyring-password.py
 | `No devices available` | Check USB connection. Run `sudo ldconfig`. Run `lsusb \| grep 2541`. |
 | `verify-no-match` | Old enrollment data. Run `fprintd-delete $(whoami) && fprintd-enroll`. |
 | System update broke it | Run `./reinstall.sh` or reinstall the .deb/.rpm package. |
-| Scanner not detected | USB passthrough keyboards only work when wired (not Bluetooth). |
+| Scanner not detected | If plugged into a keyboard's USB port, the keyboard **must be connected via USB cable** (not Bluetooth/wireless). See USB Connection Requirement above. |
 | Burns through retries | Check patch: `grep CS9711_DEFAULT_RESET_SLEEP` in `cs9711.c` should show `1500`. |
 | Unsupported distro | Install dependencies manually (see source), then run `install.sh`. |
 
