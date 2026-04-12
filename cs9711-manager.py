@@ -527,15 +527,34 @@ class CS9711Window(Adw.ApplicationWindow):
         self.cancel_enroll_btn.set_visible(False)
         self._enroll_process = None
         if success:
-            self.enroll_progress.set_text("Enrollment complete! Now verify — touch the scanner...")
-            self.show_toast("Enrollment complete! Verifying...")
+            self.enroll_progress.set_text("All 15 touches done! Enrollment saved.")
             self.refresh_all()
-            # Auto-trigger verification after successful enrollment
-            GLib.timeout_add(1500, self._auto_verify_after_enroll)
+            # Ask user if they want to verify
+            dialog = Adw.AlertDialog(
+                heading="Enrollment complete!",
+                body="All 15 touches recorded successfully.\n\n"
+                     "Would you like to do a quick verification touch to confirm "
+                     "your fingerprint is working?",
+            )
+            dialog.add_response("skip", "Skip")
+            dialog.add_response("verify", "Verify Now")
+            dialog.set_response_appearance("verify", Adw.ResponseAppearance.SUGGESTED)
+            dialog.connect("response", self._on_post_enroll_verify_response)
+            dialog.present(self)
         else:
             self.enroll_progress.set_text(message)
             self.show_toast(message)
         return False
+
+    def _on_post_enroll_verify_response(self, dialog, response):
+        log.info(f"Post-enroll verify dialog response: {response}")
+        if response == "verify":
+            self.show_toast("Touch the scanner once to verify...")
+            self.enroll_progress.set_text("Verification — touch the scanner once...")
+            self._auto_verify_after_enroll()
+        else:
+            self.show_toast("Enrollment saved — you're all set!")
+            self.enroll_progress.set_text("Enrollment saved.")
 
     def _auto_verify_after_enroll(self):
         """Auto-verify after enrollment to confirm the fingerprint works."""
@@ -621,15 +640,30 @@ class CS9711Window(Adw.ApplicationWindow):
         def do_delete():
             user = os.environ.get("USER", "nobody")
             log.info(f"Delete confirmed — deleting all fingerprints for {user}")
-            # fprintd-delete can fail with "AlreadyInUse" if the device is still
-            # claimed from a recent operation. Retry up to 3 times with a pause.
+
+            # Kill any running fprintd operation (verify/enroll) that holds the device
+            if self._enroll_process:
+                log.info("Terminating active enrollment before delete")
+                try:
+                    self._enroll_process.terminate()
+                    self._enroll_process.wait(timeout=3)
+                except Exception:
+                    pass
+                self._enroll_process = None
+
+            # Also kill any stray fprintd-verify/fprintd-enroll processes
+            for proc_name in ["fprintd-verify", "fprintd-enroll"]:
+                subprocess.run(["pkill", "-f", proc_name], capture_output=True)
+            time.sleep(0.5)
+
+            # Retry up to 3 times in case device claim takes a moment to release
             for attempt in range(3):
                 rc, out, err = run_cmd(["fprintd-delete", user], timeout=10)
                 msg = err or out  # fprintd puts some errors on stdout
                 if rc == 0 or "AlreadyInUse" not in msg:
                     break
-                log.warning(f"Delete attempt {attempt + 1}/3 got AlreadyInUse — retrying in 1.5s")
-                time.sleep(1.5)
+                log.warning(f"Delete attempt {attempt + 1}/3 got AlreadyInUse — retrying in 2s")
+                time.sleep(2)
             def _done():
                 self.delete_btn.set_sensitive(True)
                 if rc == 0:
@@ -863,18 +897,6 @@ class CS9711Window(Adw.ApplicationWindow):
         group.add(rebuild_row)
         self._maintenance_rebuild_btn = rebuild_btn
 
-        # Full reinstall
-        reinstall_row = Adw.ActionRow(
-            title="Full Install",
-            subtitle="Fresh clone, patch, build, and install from scratch",
-        )
-        reinstall_row.add_prefix(Gtk.Image.new_from_icon_name("emblem-downloads-symbolic"))
-        reinstall_btn = Gtk.Button(label="Install", valign=Gtk.Align.CENTER)
-        reinstall_btn.connect("clicked", self.on_full_install)
-        reinstall_row.add_suffix(reinstall_btn)
-        group.add(reinstall_row)
-        self._maintenance_install_btn = reinstall_btn
-
         # Uninstall
         uninstall_row = Adw.ActionRow(
             title="Uninstall Everything",
@@ -944,22 +966,6 @@ class CS9711Window(Adw.ApplicationWindow):
                 GLib.idle_add(self._maintenance_done, btn, "Rebuild", f"Failed: {err[:80]}", False)
 
         threading.Thread(target=do_rebuild, daemon=True).start()
-
-    def on_full_install(self, btn):
-        log.info("User clicked Full Install")
-        btn.set_sensitive(False)
-        btn.set_label("Installing...")
-        self.show_toast("Running full install — this may take several minutes...")
-
-        def do_install():
-            script = os.path.join(SCRIPT_DIR, "install.sh")
-            rc, out, err = run_cmd(["pkexec", "bash", script], timeout=600)
-            if rc == 0:
-                GLib.idle_add(self._maintenance_done, btn, "Install", "Installation complete!", True)
-            else:
-                GLib.idle_add(self._maintenance_done, btn, "Install", f"Failed: {err[:80]}", False)
-
-        threading.Thread(target=do_install, daemon=True).start()
 
     def on_uninstall(self, btn):
         log.info("User clicked Uninstall Everything")

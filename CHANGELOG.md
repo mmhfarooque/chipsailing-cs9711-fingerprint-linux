@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.7.1] - 2026-04-12
+
+### Fixed
+- **Delete All always failed after enrollment** — the auto-verify process (`fprintd-verify`, 30s timeout) kept the device claimed, blocking `fprintd-delete`. Now kills any running `fprintd-verify` or `fprintd-enroll` process before attempting delete.
+- **Post-enrollment verify confused users** — after 15 touches, the GUI silently started `fprintd-verify` requesting another touch, making users think enrollment wasn't done. Now shows a clear dialog: "Enrollment complete! All 15 touches recorded. Would you like to verify?" with Skip/Verify buttons.
+
+### Removed
+- **Full Install button** — running `install.sh` via pkexec failed because the script refuses to run as root. Rebuild Driver covers the use case. Users who need a fresh install should run `./install.sh` from the terminal.
+
+---
+
 ## [1.7.0] - 2026-04-12
 
 ### Added
