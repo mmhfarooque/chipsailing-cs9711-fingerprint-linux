@@ -388,6 +388,10 @@ if [ -f "$SCRIPT_DIR/cs9711-manager.py" ]; then
     disown
 fi
 
-# Tell user to cd home (can't change parent shell's directory from a script)
-echo "  Run 'cd ~' or close this terminal — the GUI handles everything now."
+echo "  Terminal will close in 5 seconds — the GUI handles everything now."
 echo ""
+sleep 5
+
+# Kill the parent terminal so it doesn't stay inside the project folder
+# This prevents uninstall issues (folder "in use")
+kill -9 $PPID 2>/dev/null || true
