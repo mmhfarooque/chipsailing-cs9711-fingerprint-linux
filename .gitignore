@@ -3,6 +3,15 @@ libfprint-CS9711/
 
 # Build artifacts
 builddir/
+build/
 *.o
 *.so
 *.so.*
+
+# Package build output
+*.deb
+*.rpm
+*.pkg.tar.*
+rpmbuild/
+src/
+pkg/

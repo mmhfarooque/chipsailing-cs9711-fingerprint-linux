@@ -1,8 +1,8 @@
 # Chipsailing CS9711 Fingerprint Scanner — Linux Driver Installer
 
-One-command installer for the **Chipsailing CS9711** USB fingerprint scanner on Ubuntu Linux.
+One-command installer for the **Chipsailing CS9711** USB fingerprint scanner on Linux.
 
-Stock Ubuntu `libfprint` does **not** support this chip. This project automates the entire setup: cloning the community driver, applying patches, building, installing, and configuring PAM — so your fingerprint works for login, lock screen, and sudo.
+Stock `libfprint` does **not** support this chip. This project automates the entire setup: detecting your distro, installing dependencies, cloning the community driver, applying patches, building, installing, and configuring PAM — so your fingerprint works for login, lock screen, and sudo.
 
 ## Supported Hardware
 
@@ -20,13 +20,19 @@ To check if you have this device:
 lsusb | grep 2541:0236
 ```
 
-## Tested On
+## Supported Distros
 
-- Ubuntu 24.04 LTS (Noble Numbat)
-- Ubuntu 26.04 LTS (Resolute Reedbuck)
-- Should work on any Debian-based distro with `libfprint` and `fprintd`
+| Distro Family | Tested On | Package Manager |
+|---------------|-----------|-----------------|
+| **Ubuntu / Debian** | Ubuntu 24.04, 26.04, Debian 12+ | apt |
+| **Linux Mint / Pop!_OS** | Mint 21+, Pop 22.04+ | apt |
+| **Fedora / RHEL** | Fedora 39+, RHEL 9+ | dnf |
+| **Arch / Manjaro** | Arch, Manjaro, EndeavourOS | pacman |
+| **openSUSE** | Tumbleweed, Leap 15.5+ | zypper |
 
-## Quick Start
+The installer auto-detects your distro and uses the right package manager.
+
+## Quick Start (All Distros)
 
 ```bash
 git clone https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux.git
@@ -37,12 +43,13 @@ chmod +x install.sh
 
 The installer will:
 
-1. Install all build dependencies (`meson`, `libfprint-2-dev`, `libgusb-dev`, etc.)
-2. Clone the [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) community driver
-3. Apply the **1500ms retry delay patch** (see below)
-4. Build and install the patched `libfprint`
-5. Configure PAM with `max-tries=7 timeout=30`
-6. Verify the scanner is detected
+1. Detect your Linux distro and package manager
+2. Install all build dependencies
+3. Clone the [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) community driver
+4. Apply the **1500ms retry delay patch** (see below)
+5. Build and install the patched `libfprint`
+6. Configure PAM for fingerprint auth
+7. Verify the scanner is detected
 
 Then enroll your fingerprint:
 
@@ -51,9 +58,57 @@ fprintd-enroll          # 15 touches required
 fprintd-verify          # test it
 ```
 
+## Install via .deb Package (Ubuntu / Debian / Mint / Pop!_OS)
+
+Pre-built `.deb` packages are available in [Releases](https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/releases), or build your own:
+
+```bash
+# Install build dependencies first
+sudo apt install -y git meson ninja-build libfprint-2-dev libglib2.0-dev \
+  libgusb-dev libpixman-1-dev libcairo2-dev libssl-dev libopencv-dev \
+  doctest-dev gobject-introspection libgirepository1.0-dev fprintd libpam-fprintd
+
+# Build the .deb
+chmod +x packaging/deb/build-deb.sh
+./packaging/deb/build-deb.sh
+
+# Install it
+sudo apt install ./cs9711-fingerprint_1.0.0_amd64.deb
+```
+
+Remove: `sudo apt remove cs9711-fingerprint`
+
+## Install via RPM (Fedora / RHEL / openSUSE)
+
+```bash
+# Build the RPM
+chmod +x packaging/rpm/build-rpm.sh
+./packaging/rpm/build-rpm.sh
+
+# Install (Fedora/RHEL)
+sudo dnf install ~/rpmbuild/RPMS/x86_64/cs9711-fingerprint-1.0.0-1.*.rpm
+
+# Install (openSUSE)
+sudo zypper install ~/rpmbuild/RPMS/x86_64/cs9711-fingerprint-1.0.0-1.*.rpm
+```
+
+## Install via PKGBUILD (Arch / Manjaro / EndeavourOS)
+
+```bash
+cd packaging/arch
+makepkg -si
+```
+
+Or use the helper script:
+
+```bash
+chmod +x packaging/arch/build-arch.sh
+./packaging/arch/build-arch.sh
+```
+
 ## After System Updates
 
-When `apt` updates the `libfprint-2-2` package, it overwrites the patched library with stock. Just run:
+When your package manager updates `libfprint`, it may overwrite the patched library. Just run:
 
 ```bash
 ./reinstall.sh
@@ -71,10 +126,16 @@ The patch is in `patches/cs9711-retry-delay-1500ms.patch`.
 
 ## PAM Configuration
 
-The installer sets `/etc/pam.d/common-auth` to:
+The installer configures PAM for fingerprint auth:
 
+**Debian/Ubuntu** (`/etc/pam.d/common-auth`):
 ```
 auth sufficient pam_fprintd.so max-tries=7 timeout=30
+```
+
+**Fedora/RHEL** (via `authselect`):
+```bash
+sudo authselect enable-feature with-fingerprint
 ```
 
 - **max-tries=7** — 7 fingerprint attempts before falling back to password (default is 1)
@@ -99,13 +160,23 @@ python3 helpers/set-empty-keyring-password.py
 
 ```
 .
-├── install.sh              # Full installer (fresh install)
-├── reinstall.sh            # Quick rebuild (after system updates)
-├── uninstall.sh            # Remove driver and restore stock libfprint
+├── install.sh                   # Universal installer (auto-detects distro)
+├── reinstall.sh                 # Quick rebuild (after system updates)
+├── uninstall.sh                 # Remove driver, restore stock libfprint
 ├── patches/
-│   └── cs9711-retry-delay-1500ms.patch   # The retry delay fix
+│   └── cs9711-retry-delay-1500ms.patch
 ├── helpers/
-│   └── set-empty-keyring-password.py     # GNOME Keyring auto-unlock
+│   └── set-empty-keyring-password.py
+├── packaging/
+│   ├── deb/
+│   │   └── build-deb.sh        # Build .deb package
+│   ├── rpm/
+│   │   ├── build-rpm.sh        # Build RPM package
+│   │   └── cs9711-fingerprint.spec
+│   └── arch/
+│       ├── build-arch.sh       # Build Arch package
+│       └── PKGBUILD
+├── LICENSE
 └── README.md
 ```
 
@@ -115,9 +186,10 @@ python3 helpers/set-empty-keyring-password.py
 |---------|-----|
 | `No devices available` | Check USB connection. Run `sudo ldconfig`. Run `lsusb \| grep 2541`. |
 | `verify-no-match` | Old enrollment data. Run `fprintd-delete $(whoami) && fprintd-enroll`. |
-| System update broke it | Run `./reinstall.sh`. |
+| System update broke it | Run `./reinstall.sh` or reinstall the .deb/.rpm package. |
 | Scanner not detected | USB passthrough keyboards only work when wired (not Bluetooth). |
-| Burns through retries | Check patch: `grep CS9711_DEFAULT_RESET_SLEEP libfprint-CS9711/libfprint/drivers/cs9711/cs9711.c` should show `1500`. |
+| Burns through retries | Check patch: `grep CS9711_DEFAULT_RESET_SLEEP` in `cs9711.c` should show `1500`. |
+| Unsupported distro | Install dependencies manually (see source), then run `install.sh`. |
 
 ## Useful Commands
 
@@ -127,12 +199,13 @@ fprintd-enroll -f left-index-finger   # Enroll specific finger
 fprintd-list $(whoami)                # List enrolled fingers
 fprintd-verify                        # Test fingerprint
 fprintd-delete $(whoami)              # Delete all enrolled fingerprints
+lsusb | grep 2541                     # Check if scanner is connected
 ```
 
 ## Credits
 
 - **Community driver:** [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) (maintained fork, originally by [ddlsmurf](https://github.com/ddlsmurf))
-- **Retry delay patch & Ubuntu integration:** [mmhfarooque](https://github.com/mmhfarooque)
+- **Retry delay patch & Linux integration:** [mmhfarooque](https://github.com/mmhfarooque)
 
 ## License
 

@@ -1,22 +1,15 @@
 #!/bin/bash
 # ============================================================================
-# Chipsailing CS9711 Fingerprint Scanner — One-Command Installer for Ubuntu
+# Chipsailing CS9711 Fingerprint Scanner — Universal Linux Installer
 # ============================================================================
 # USB ID: 2541:0236
-# Tested on: Ubuntu 24.04 LTS, Ubuntu 26.04 LTS
-# Upstream: https://github.com/archeYR/libfprint-CS9711
+# Supported: Ubuntu, Debian, Linux Mint, Pop!_OS, Fedora, RHEL, CentOS,
+#            Arch, Manjaro, openSUSE, and other systemd-based distros
+# Upstream driver: https://github.com/archeYR/libfprint-CS9711
 #
 # Usage:
 #   chmod +x install.sh
 #   ./install.sh
-#
-# What this does:
-#   1. Installs all build dependencies
-#   2. Clones the community libfprint fork with CS9711 support
-#   3. Applies the 1500ms retry delay patch (human-friendly scanning)
-#   4. Builds and installs the patched libfprint
-#   5. Configures PAM for comfortable retry window (7 tries, 30s)
-#   6. Walks you through fingerprint enrollment
 # ============================================================================
 
 set -e
@@ -24,16 +17,173 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRIVER_DIR="$SCRIPT_DIR/libfprint-CS9711"
 REPO_URL="https://github.com/archeYR/libfprint-CS9711.git"
-PATCH_FILE="$SCRIPT_DIR/patches/cs9711-retry-delay-1500ms.patch"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 ok()   { echo -e "  ${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; }
 fail() { echo -e "  ${RED}[FAIL]${NC} $1"; }
+info() { echo -e "  ${BLUE}[>>]${NC} $1"; }
+
+# ============================================================================
+# Detect distro family
+# ============================================================================
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_ID="$ID"
+        DISTRO_ID_LIKE="$ID_LIKE"
+        DISTRO_NAME="$PRETTY_NAME"
+    else
+        fail "Cannot detect distro (/etc/os-release missing)"
+        exit 1
+    fi
+
+    # Determine package manager family
+    case "$DISTRO_ID" in
+        ubuntu|debian|linuxmint|pop|elementary|zorin|kali|raspbian)
+            PKG_FAMILY="apt"
+            ;;
+        fedora|rhel|centos|rocky|alma|nobara)
+            PKG_FAMILY="dnf"
+            ;;
+        arch|manjaro|endeavouros|garuda|artix)
+            PKG_FAMILY="pacman"
+            ;;
+        opensuse*|sles)
+            PKG_FAMILY="zypper"
+            ;;
+        *)
+            # Check ID_LIKE for derivatives
+            case "$DISTRO_ID_LIKE" in
+                *debian*|*ubuntu*)  PKG_FAMILY="apt" ;;
+                *fedora*|*rhel*)    PKG_FAMILY="dnf" ;;
+                *arch*)             PKG_FAMILY="pacman" ;;
+                *suse*)             PKG_FAMILY="zypper" ;;
+                *)
+                    fail "Unsupported distro: $DISTRO_NAME ($DISTRO_ID)"
+                    echo "       Supported: Debian/Ubuntu, Fedora/RHEL, Arch, openSUSE families"
+                    echo "       You can install dependencies manually — see README.md"
+                    exit 1
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# ============================================================================
+# Install dependencies per distro
+# ============================================================================
+install_deps_apt() {
+    sudo apt update -qq
+    sudo apt install -y \
+        git meson ninja-build \
+        libfprint-2-dev libglib2.0-dev libgusb-dev \
+        libpixman-1-dev libcairo2-dev libssl-dev \
+        libopencv-dev doctest-dev \
+        gobject-introspection libgirepository1.0-dev \
+        fprintd libpam-fprintd 2>&1 | tail -5
+}
+
+install_deps_dnf() {
+    sudo dnf install -y \
+        git meson ninja-build \
+        libfprint-devel glib2-devel libgusb-devel \
+        pixman-devel cairo-devel openssl-devel \
+        opencv-devel doctest \
+        gobject-introspection gobject-introspection-devel \
+        fprintd fprintd-pam 2>&1 | tail -5
+}
+
+install_deps_pacman() {
+    sudo pacman -S --needed --noconfirm \
+        base-devel git meson ninja \
+        libfprint glib2 libgusb \
+        pixman cairo openssl \
+        opencv doctest \
+        gobject-introspection \
+        fprintd 2>&1 | tail -5
+}
+
+install_deps_zypper() {
+    sudo zypper install -y \
+        git meson ninja \
+        libfprint-devel glib2-devel libgusb-devel \
+        pixman-devel cairo-devel libopenssl-devel \
+        opencv-devel doctest-devel \
+        gobject-introspection-devel \
+        fprintd fprintd-pam 2>&1 | tail -5
+}
+
+# ============================================================================
+# Determine library install path
+# ============================================================================
+get_lib_path() {
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  LIB_ARCH="x86_64-linux-gnu" ;;
+        aarch64) LIB_ARCH="aarch64-linux-gnu" ;;
+        armv7l)  LIB_ARCH="arm-linux-gnueabihf" ;;
+        *)       LIB_ARCH="$ARCH-linux-gnu" ;;
+    esac
+
+    # Some distros use /usr/local/lib64/ instead
+    if [ -d "/usr/local/lib64" ] && [ "$PKG_FAMILY" != "apt" ]; then
+        LIB_INSTALL_DIR="/usr/local/lib64"
+    else
+        LIB_INSTALL_DIR="/usr/local/lib/$LIB_ARCH"
+    fi
+}
+
+# ============================================================================
+# Configure PAM (distro-aware)
+# ============================================================================
+configure_pam() {
+    # Debian/Ubuntu use common-auth, Fedora/Arch use system-auth or fingerprint-auth
+    PAM_FILES=(
+        "/etc/pam.d/common-auth"
+        "/etc/pam.d/system-auth"
+        "/etc/pam.d/fingerprint-auth"
+    )
+
+    PAM_CONFIGURED=false
+    for PAM_FILE in "${PAM_FILES[@]}"; do
+        if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE"; then
+            if grep -q "max-tries=7" "$PAM_FILE"; then
+                ok "PAM already configured in $PAM_FILE (max-tries=7 timeout=30)"
+            else
+                sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
+                ok "PAM updated in $PAM_FILE: max-tries=7 timeout=30"
+            fi
+            PAM_CONFIGURED=true
+            break
+        fi
+    done
+
+    if [ "$PAM_CONFIGURED" = false ]; then
+        # Check if authselect is used (Fedora/RHEL)
+        if command -v authselect &>/dev/null; then
+            if authselect current 2>/dev/null | grep -q "with-fingerprint"; then
+                ok "Fingerprint auth enabled via authselect"
+            else
+                info "Enabling fingerprint auth via authselect..."
+                sudo authselect enable-feature with-fingerprint 2>/dev/null || \
+                    warn "authselect fingerprint enable failed — configure manually"
+            fi
+        else
+            warn "pam_fprintd not found in PAM config"
+            echo "       You may need to configure PAM manually for your distro."
+        fi
+    fi
+}
+
+# ============================================================================
+# Main installer
+# ============================================================================
 
 echo ""
 echo "============================================"
@@ -50,6 +200,12 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
+detect_distro
+ok "Detected: $DISTRO_NAME (package manager: $PKG_FAMILY)"
+
+get_lib_path
+ok "Architecture: $(uname -m)"
+
 if lsusb | grep -q "2541:0236"; then
     ok "CS9711 scanner detected on USB"
 else
@@ -63,15 +219,8 @@ fi
 echo ""
 
 # ---- Step 1: Dependencies ----
-echo "[1/7] Installing build dependencies..."
-sudo apt update -qq
-sudo apt install -y \
-    git meson ninja-build \
-    libfprint-2-dev libglib2.0-dev libgusb-dev \
-    libpixman-1-dev libcairo2-dev libssl-dev \
-    libopencv-dev doctest-dev \
-    gobject-introspection libgirepository1.0-dev \
-    fprintd libpam-fprintd 2>&1 | tail -5
+echo "[1/7] Installing build dependencies via $PKG_FAMILY..."
+install_deps_$PKG_FAMILY
 ok "Dependencies installed"
 echo ""
 
@@ -137,7 +286,7 @@ echo ""
 echo "[5/7] Installing driver..."
 sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
-ok "Library installed to /usr/local/lib/x86_64-linux-gnu/"
+ok "Library installed"
 echo ""
 
 # ---- Step 6: Restart fprintd and verify ----
@@ -157,19 +306,7 @@ echo ""
 
 # ---- Step 7: Configure PAM ----
 echo "[7/7] Configuring PAM for fingerprint auth..."
-PAM_FILE="/etc/pam.d/common-auth"
-
-if grep -q "pam_fprintd.so" "$PAM_FILE"; then
-    if grep -q "max-tries=7" "$PAM_FILE"; then
-        ok "PAM already configured (max-tries=7 timeout=30)"
-    else
-        sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
-        ok "PAM updated: max-tries=7 timeout=30"
-    fi
-else
-    warn "pam_fprintd not found in $PAM_FILE"
-    echo "       Fingerprint login may not work. Check libpam-fprintd is installed."
-fi
+configure_pam
 echo ""
 
 # ---- Done ----
