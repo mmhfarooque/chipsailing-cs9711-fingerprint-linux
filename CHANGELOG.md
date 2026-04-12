@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.1] - 2026-04-12
+
+### Fixed
+- **Uninstall left behind folder with root-owned files** — `meson install` runs via sudo, creating root-owned build artifacts in `libfprint-CS9711/builddir/`. The cleanup script's `rm -rf` ran as the normal user and couldn't delete these files, leaving an undeletable folder. Now the pkexec uninstall step removes `builddir/` while it still has root privileges, before the cleanup script runs. CLI `uninstall.sh` also fixed with `sudo rm -rf` on the builddir.
+
+---
+
 ## [1.8.0] - 2026-04-12
 
 ### Added

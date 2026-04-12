@@ -1167,6 +1167,8 @@ class CS9711Window(Adw.ApplicationWindow):
                     f.write("fi\n")
                     f.write("ldconfig\n")
                     f.write("systemctl restart fprintd 2>/dev/null || true\n")
+                    # Remove root-owned build files (meson creates these under sudo)
+                    f.write(f"rm -rf {shlex.quote(os.path.join(project_dir, 'libfprint-CS9711', 'builddir'))} 2>/dev/null || true\n")
                 os.chmod(tmp_script, 0o700)
 
                 GLib.idle_add(_update, 0.3, "Step 2/5 — Removing driver (enter password)...")
@@ -1206,7 +1208,7 @@ class CS9711Window(Adw.ApplicationWindow):
             GLib.idle_add(_update, 0.9, "Step 5/5 — Removing project files...")
 
             # Step 4: Create cleanup script to delete project folder after GUI exits
-            # Uses a PID wait so it only deletes after the GUI process is fully gone
+            # Root-owned builddir/ was already removed in the pkexec step above
             fd2, cleanup_script = tempfile.mkstemp(prefix="cs9711-cleanup-", suffix=".sh")
             with os.fdopen(fd2, "w") as f:
                 f.write("#!/bin/bash\n")

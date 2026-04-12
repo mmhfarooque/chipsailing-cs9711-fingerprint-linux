@@ -115,8 +115,11 @@ read -p "Also delete the project folder ($SCRIPT_DIR)? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "Removing project folder..."
+    # builddir/ contains root-owned files from sudo meson install
+    sudo rm -rf "$SCRIPT_DIR/libfprint-CS9711/builddir" 2>/dev/null || true
     rm -rf "$SCRIPT_DIR"
     echo "Done. Everything removed."
+    logmsg "Project folder deleted"
 else
     echo "Project folder kept. To reinstall later: ./install.sh"
 fi
