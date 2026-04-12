@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.1] - 2026-04-12
+
+### Changed
+- **Uninstall is now full cleanup** — "Uninstall Everything" removes driver, fingerprints, GUI, desktop shortcut, AND the entire project folder. System returns to a state as if it was never installed. GUI auto-closes after uninstall.
+
+---
+
 ## [1.4.0] - 2026-04-12
 
 ### Added

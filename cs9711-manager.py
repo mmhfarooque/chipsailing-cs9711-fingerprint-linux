@@ -770,8 +770,8 @@ class CS9711Window(Adw.ApplicationWindow):
 
         # Uninstall
         uninstall_row = Adw.ActionRow(
-            title="Uninstall Driver",
-            subtitle="Remove patched driver and restore stock libfprint",
+            title="Uninstall Everything",
+            subtitle="Remove driver, fingerprints, GUI, desktop shortcut, and project files",
         )
         uninstall_row.add_prefix(Gtk.Image.new_from_icon_name("user-trash-symbolic"))
         uninstall_btn = Gtk.Button(
@@ -825,12 +825,16 @@ class CS9711Window(Adw.ApplicationWindow):
 
     def on_uninstall(self, btn):
         dialog = Adw.AlertDialog(
-            heading="Uninstall CS9711 driver?",
-            body="This will remove the patched driver and restore stock libfprint. "
-                 "Your enrolled fingerprints will be deleted.",
+            heading="Uninstall everything?",
+            body="This will completely remove:\n\n"
+                 "- Enrolled fingerprints\n"
+                 "- Patched CS9711 driver\n"
+                 "- GUI Manager and desktop shortcut\n"
+                 "- The entire project folder\n\n"
+                 "Stock libfprint will be restored. It will be as if this was never installed.",
         )
         dialog.add_response("cancel", "Cancel")
-        dialog.add_response("uninstall", "Uninstall")
+        dialog.add_response("uninstall", "Uninstall Everything")
         dialog.set_response_appearance("uninstall", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.connect("response", self._on_uninstall_confirmed)
         dialog.present(self)
@@ -838,14 +842,41 @@ class CS9711Window(Adw.ApplicationWindow):
     def _on_uninstall_confirmed(self, dialog, response):
         if response != "uninstall":
             return
-        script = os.path.join(SCRIPT_DIR, "uninstall.sh")
+
+        project_dir = SCRIPT_DIR
+        desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
 
         def do_uninstall():
-            rc, out, err = run_cmd(["pkexec", "bash", script], timeout=120)
+            # Step 1: Remove driver (needs sudo)
+            uninstall_script = os.path.join(project_dir, "uninstall.sh")
+            # Run uninstall.sh but pipe "n" to skip the folder delete prompt
+            # (we'll handle folder deletion ourselves after closing the GUI)
+            rc, out, err = run_cmd(
+                ["bash", "-c", f"echo n | bash '{uninstall_script}'"],
+                timeout=120,
+            )
+
+            # Step 2: Remove desktop shortcut
+            try:
+                os.remove(desktop_file)
+            except FileNotFoundError:
+                pass
+
+            # Step 3: Create a self-destruct script that runs after GUI closes
+            cleanup_script = "/tmp/cs9711-cleanup.sh"
+            with open(cleanup_script, "w") as f:
+                f.write("#!/bin/bash\n")
+                f.write("sleep 2\n")
+                f.write(f"rm -rf '{project_dir}'\n")
+                f.write(f"rm -f '{cleanup_script}'\n")
+            os.chmod(cleanup_script, 0o755)
+
             if rc == 0:
+                # Launch cleanup and close GUI
+                subprocess.Popen([cleanup_script])
                 def _done():
-                    self.show_toast("Driver uninstalled")
-                    self.refresh_all()
+                    self.show_toast("Uninstall complete — closing...")
+                    GLib.timeout_add(2000, lambda: self.close() or False)
                     return False
                 GLib.idle_add(_done)
             else:
