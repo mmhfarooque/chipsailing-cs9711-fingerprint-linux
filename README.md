@@ -168,7 +168,7 @@ The GUI lets you:
 - Rebuild/install/uninstall the driver
 - Configure GNOME Keyring auto-unlock
 
-![screenshot](https://img.shields.io/badge/GTK4-libadwaita-blue?style=flat-square)
+![CS9711 Fingerprint Manager](screenshot.png)
 
 ## Optional: Auto-Unlock GNOME Keyring
 
