@@ -885,6 +885,20 @@ class CS9711Window(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup(title="Maintenance")
         parent.append(group)
 
+        # Update checker
+        self.update_row = Adw.ActionRow(
+            title=f"Version: v{APP_VERSION}",
+            subtitle="Click to check for updates",
+        )
+        self.update_row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
+        self.update_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4,
+                                       valign=Gtk.Align.CENTER)
+        self.check_update_btn = Gtk.Button(label="Check for Updates")
+        self.check_update_btn.connect("clicked", self.on_check_update)
+        self.update_btn_box.append(self.check_update_btn)
+        self.update_row.add_suffix(self.update_btn_box)
+        group.add(self.update_row)
+
         # Rebuild driver
         rebuild_row = Adw.ActionRow(
             title="Rebuild Driver",
@@ -966,6 +980,122 @@ class CS9711Window(Adw.ApplicationWindow):
                 GLib.idle_add(self._maintenance_done, btn, "Rebuild", f"Failed: {err[:80]}", False)
 
         threading.Thread(target=do_rebuild, daemon=True).start()
+
+    def on_check_update(self, btn):
+        log.info("User clicked Check for Updates")
+        btn.set_sensitive(False)
+        btn.set_label("Checking...")
+        self.update_row.set_subtitle("Checking for updates...")
+
+        def do_check():
+            # Fetch latest from remote
+            rc, _, err = run_cmd(["git", "-C", SCRIPT_DIR, "fetch", "origin"], timeout=30)
+            if rc != 0:
+                GLib.idle_add(self._update_check_done, None, f"Fetch failed: {err[:60]}")
+                return
+
+            # Read remote VERSION
+            rc, remote_version, _ = run_cmd(
+                ["git", "-C", SCRIPT_DIR, "show", "origin/main:VERSION"], timeout=5
+            )
+            remote_version = remote_version.strip() if rc == 0 else None
+
+            # Get changelog diff
+            rc, changelog, _ = run_cmd(
+                ["git", "-C", SCRIPT_DIR, "log", f"HEAD..origin/main",
+                 "--oneline", "--no-decorate"], timeout=5
+            )
+
+            GLib.idle_add(self._update_check_done, remote_version, changelog)
+
+        threading.Thread(target=do_check, daemon=True).start()
+
+    def _update_check_done(self, remote_version, changelog):
+        self.check_update_btn.set_sensitive(True)
+        self.check_update_btn.set_label("Check for Updates")
+
+        if remote_version is None:
+            self.update_row.set_subtitle(f"v{APP_VERSION} — could not check remote")
+            self.show_toast(f"Update check failed: {changelog}")
+            return False
+
+        if not changelog or remote_version == APP_VERSION:
+            self.update_row.set_subtitle(f"v{APP_VERSION} — up to date!")
+            log.info(f"No updates available (local={APP_VERSION}, remote={remote_version})")
+            self.show_toast("You're on the latest version!")
+            return False
+
+        # Update available
+        log.info(f"Update available: v{APP_VERSION} → v{remote_version}")
+        self.update_row.set_subtitle(f"v{APP_VERSION} → v{remote_version} available")
+
+        # Show update dialog
+        dialog = Adw.AlertDialog(
+            heading=f"Update available: v{remote_version}",
+            body=f"You have v{APP_VERSION}. Changes:\n\n{changelog}\n\n"
+                 "The GUI will restart after updating.",
+        )
+        dialog.add_response("cancel", "Later")
+        dialog.add_response("update", "Update Now")
+        dialog.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", self._on_update_confirmed, remote_version)
+        dialog.present(self)
+        return False
+
+    def _on_update_confirmed(self, dialog, response, remote_version):
+        log.info(f"Update dialog response: {response}")
+        if response != "update":
+            return
+
+        self.check_update_btn.set_sensitive(False)
+        self.update_row.set_subtitle("Updating...")
+        log.info(f"Updating from v{APP_VERSION} to v{remote_version}")
+
+        def do_update():
+            # Pull latest
+            rc, out, err = run_cmd(["git", "-C", SCRIPT_DIR, "pull", "origin", "main"], timeout=60)
+            if rc != 0:
+                log.error(f"git pull failed: {err}")
+                GLib.idle_add(self._update_failed, err)
+                return
+
+            # Check if driver-related files changed (need rebuild)
+            rc2, changed, _ = run_cmd(
+                ["git", "-C", SCRIPT_DIR, "diff", "--name-only", f"HEAD~1..HEAD"], timeout=5
+            )
+            needs_rebuild = any(f in changed for f in [
+                "install.sh", "reinstall.sh", "patches/"
+            ]) if rc2 == 0 else False
+
+            log.info(f"Update pulled. Changed files: {changed}. Needs rebuild: {needs_rebuild}")
+
+            def _restart():
+                self.update_row.set_subtitle(f"Updated to v{remote_version} — restarting...")
+                self.show_toast("Updated! Restarting GUI...")
+
+                if needs_rebuild:
+                    log.info("Driver files changed — prompting rebuild after restart")
+
+                # Restart the GUI after a short delay
+                GLib.timeout_add(1500, self._restart_gui)
+                return False
+            GLib.idle_add(_restart)
+
+        threading.Thread(target=do_update, daemon=True).start()
+
+    def _update_failed(self, err):
+        self.check_update_btn.set_sensitive(True)
+        self.check_update_btn.set_label("Check for Updates")
+        self.update_row.set_subtitle(f"v{APP_VERSION} — update failed")
+        self.show_toast(f"Update failed: {err[:60]}")
+        return False
+
+    def _restart_gui(self):
+        log.info("=== GUI restarting after update ===")
+        # Re-launch self and exit
+        subprocess.Popen(["python3", os.path.join(SCRIPT_DIR, "cs9711-manager.py")])
+        self.close()
+        return False
 
     def on_uninstall(self, btn):
         log.info("User clicked Uninstall Everything")

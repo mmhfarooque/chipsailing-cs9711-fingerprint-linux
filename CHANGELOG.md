@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.0] - 2026-04-12
+
+### Added
+- **Self-update from Git** — new "Check for Updates" button in Maintenance section. Shows current version, fetches the latest from GitHub, displays what changed, and offers a one-click update. After updating, the GUI auto-restarts with the new version. No uninstall/reinstall needed — the app runs directly from the git clone.
+
+---
+
 ## [1.7.1] - 2026-04-12
 
 ### Fixed
