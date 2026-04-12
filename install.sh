@@ -351,8 +351,7 @@ chmod +x "$SCRIPT_DIR/cs9711-manager.py" 2>/dev/null || true
 # Create desktop shortcut
 DESKTOP_FILE="$HOME/.local/share/applications/cs9711-manager.desktop"
 mkdir -p "$HOME/.local/share/applications"
-cat > "$DESKTOP_FILE" << DESKEOF
-[Desktop Entry]
+echo "[Desktop Entry]
 Type=Application
 Name=CS9711 Fingerprint Manager
 Comment=Configure Chipsailing CS9711 fingerprint scanner
@@ -360,8 +359,7 @@ Exec=python3 $SCRIPT_DIR/cs9711-manager.py
 Icon=auth-fingerprint-symbolic
 Terminal=false
 Categories=Settings;HardwareSettings;System;
-Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;
-DESKEOF
+Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;" > "$DESKTOP_FILE"
 
 ok "GUI Manager installed — search 'CS9711' or 'Fingerprint' in app launcher"
 echo ""
@@ -382,8 +380,8 @@ echo "    3. (Optional) Enroll more fingers:"
 echo "       fprintd-enroll -f left-index-finger"
 echo ""
 echo "    4. Open the GUI Manager:"
-echo "       python3 $SCRIPT_DIR/cs9711-manager.py"
-echo "       Or search 'CS9711' in your app launcher."
+echo "       Search 'CS9711' or 'Fingerprint' in your app launcher"
+echo "       Or run: python3 cs9711-manager.py"
 echo ""
 echo "  Troubleshooting:"
 echo "    - 'No devices': check USB, run 'sudo ldconfig'"
