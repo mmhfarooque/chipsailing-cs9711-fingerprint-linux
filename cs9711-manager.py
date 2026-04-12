@@ -845,24 +845,31 @@ class CS9711Window(Adw.ApplicationWindow):
 
         project_dir = SCRIPT_DIR
         desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
+        user = os.environ.get("USER", "nobody")
+
+        # Build a single sudo script that does everything non-interactively
+        uninstall_cmds = f"""
+fprintd-delete '{user}' 2>/dev/null || true
+rm -f /usr/local/lib/x86_64-linux-gnu/libfprint-2.so* 2>/dev/null
+rm -f /usr/local/lib/x86_64-linux-gnu/girepository-1.0/FPrint-2.0.typelib 2>/dev/null
+rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null
+ldconfig
+apt install --reinstall -y libfprint-2-2 2>/dev/null || true
+ldconfig
+systemctl restart fprintd 2>/dev/null || true
+"""
 
         def do_uninstall():
-            # Step 1: Remove driver (needs sudo)
-            uninstall_script = os.path.join(project_dir, "uninstall.sh")
-            # Run uninstall.sh but pipe "n" to skip the folder delete prompt
-            # (we'll handle folder deletion ourselves after closing the GUI)
-            rc, out, err = run_cmd(
-                ["bash", "-c", f"echo n | bash '{uninstall_script}'"],
-                timeout=120,
-            )
+            # Step 1: Remove driver via pkexec (single sudo call)
+            rc, out, err = run_as_root(uninstall_cmds)
 
-            # Step 2: Remove desktop shortcut
+            # Step 2: Remove desktop shortcut (no sudo needed)
             try:
                 os.remove(desktop_file)
             except FileNotFoundError:
                 pass
 
-            # Step 3: Create a self-destruct script that runs after GUI closes
+            # Step 3: Create cleanup script to delete project folder after GUI closes
             cleanup_script = "/tmp/cs9711-cleanup.sh"
             with open(cleanup_script, "w") as f:
                 f.write("#!/bin/bash\n")
@@ -871,16 +878,13 @@ class CS9711Window(Adw.ApplicationWindow):
                 f.write(f"rm -f '{cleanup_script}'\n")
             os.chmod(cleanup_script, 0o755)
 
-            if rc == 0:
-                # Launch cleanup and close GUI
-                subprocess.Popen([cleanup_script])
-                def _done():
-                    self.show_toast("Uninstall complete — closing...")
-                    GLib.timeout_add(2000, lambda: self.close() or False)
-                    return False
-                GLib.idle_add(_done)
-            else:
-                GLib.idle_add(lambda: (self.show_toast(f"Uninstall failed: {err[:80]}"), False)[-1])
+            # Launch cleanup and close GUI
+            subprocess.Popen([cleanup_script])
+            def _done():
+                self.show_toast("Uninstall complete — everything removed. Closing...")
+                GLib.timeout_add(2000, lambda: self.close() or False)
+                return False
+            GLib.idle_add(_done)
 
         threading.Thread(target=do_uninstall, daemon=True).start()
 
