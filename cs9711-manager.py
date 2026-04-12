@@ -847,21 +847,24 @@ class CS9711Window(Adw.ApplicationWindow):
         desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
         user = os.environ.get("USER", "nobody")
 
-        # Build a single sudo script that does everything non-interactively
-        uninstall_cmds = f"""
-fprintd-delete '{user}' 2>/dev/null || true
-rm -f /usr/local/lib/x86_64-linux-gnu/libfprint-2.so* 2>/dev/null
-rm -f /usr/local/lib/x86_64-linux-gnu/girepository-1.0/FPrint-2.0.typelib 2>/dev/null
-rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null
-ldconfig
-apt install --reinstall -y libfprint-2-2 2>/dev/null || true
-ldconfig
-systemctl restart fprintd 2>/dev/null || true
-"""
-
         def do_uninstall():
-            # Step 1: Remove driver via pkexec (single sudo call)
-            rc, out, err = run_as_root(uninstall_cmds)
+            # Step 1: Write uninstall commands to a temp script (avoids multi-line pkexec issues)
+            tmp_script = "/tmp/cs9711-uninstall-now.sh"
+            with open(tmp_script, "w") as f:
+                f.write("#!/bin/bash\n")
+                f.write(f"fprintd-delete '{user}' 2>/dev/null || true\n")
+                f.write("rm -f /usr/local/lib/x86_64-linux-gnu/libfprint-2.so* 2>/dev/null\n")
+                f.write("rm -f /usr/local/lib/x86_64-linux-gnu/girepository-1.0/FPrint-2.0.typelib 2>/dev/null\n")
+                f.write("rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null\n")
+                f.write("ldconfig\n")
+                f.write("apt install --reinstall -y libfprint-2-2 2>/dev/null || true\n")
+                f.write("ldconfig\n")
+                f.write("systemctl restart fprintd 2>/dev/null || true\n")
+            os.chmod(tmp_script, 0o755)
+
+            # Step 2: Run via pkexec
+            rc, out, err = run_cmd(["pkexec", tmp_script], timeout=120)
+            os.remove(tmp_script)
 
             # Step 2: Remove desktop shortcut (no sudo needed)
             try:
