@@ -271,8 +271,20 @@ class CS9711Window(Adw.ApplicationWindow):
         fingers = get_enrolled_fingers()
         if fingers:
             self.status_fingers.set_subtitle(", ".join(fingers))
+            self._has_enrolled_fingers = True
+            self.enroll_btn.set_label("Add Another Finger")
+            self.enroll_status_row.set_title("Enrolled")
+            self.enroll_status_row.set_subtitle(
+                f"{len(fingers)} finger(s) enrolled: {', '.join(fingers)}"
+            )
         else:
             self.status_fingers.set_subtitle("None enrolled")
+            self._has_enrolled_fingers = False
+            self.enroll_btn.set_label("Enroll")
+            self.enroll_status_row.set_title("Not Enrolled")
+            self.enroll_status_row.set_subtitle(
+                "No fingerprints enrolled yet — enroll below to get started"
+            )
 
     # ========================================================================
     # Enrollment Section
@@ -282,6 +294,16 @@ class CS9711Window(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup(title="Fingerprint Enrollment",
                                      description="15 touches required per finger")
         parent.append(group)
+
+        # Enrollment status banner
+        self.enroll_status_row = Adw.ActionRow(
+            title="Enrollment Status",
+            subtitle="Checking...",
+        )
+        self.enroll_status_row.add_prefix(
+            Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
+        )
+        group.add(self.enroll_status_row)
 
         # Finger selector
         self.finger_dropdown = Adw.ComboRow(title="Finger to enroll")
@@ -305,7 +327,7 @@ class CS9711Window(Adw.ApplicationWindow):
         parent.append(btn_box)
 
         self.enroll_btn = Gtk.Button(label="Enroll", css_classes=["suggested-action"])
-        self.enroll_btn.connect("clicked", self.on_enroll)
+        self.enroll_btn.connect("clicked", self.on_enroll_clicked)
         btn_box.append(self.enroll_btn)
 
         self.verify_btn = Gtk.Button(label="Test Verify")
@@ -320,7 +342,30 @@ class CS9711Window(Adw.ApplicationWindow):
         self.cancel_enroll_btn.connect("clicked", self.on_cancel_enroll)
         btn_box.append(self.cancel_enroll_btn)
 
-    def on_enroll(self, btn):
+        # Track enrolled state
+        self._has_enrolled_fingers = False
+
+    def on_enroll_clicked(self, btn):
+        """Handle enroll button — confirm re-enroll if fingers already exist."""
+        if self._has_enrolled_fingers:
+            dialog = Adw.AlertDialog(
+                heading="Fingerprints already enrolled",
+                body="You already have fingerprints enrolled. Enrolling a new finger "
+                     "will add to the existing ones. To start fresh, delete all first.",
+            )
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("add", "Add Another Finger")
+            dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+            dialog.connect("response", self._on_reenroll_confirmed)
+            dialog.present(self)
+        else:
+            self._start_enroll()
+
+    def _on_reenroll_confirmed(self, dialog, response):
+        if response == "add":
+            self._start_enroll()
+
+    def _start_enroll(self):
         idx = self.finger_dropdown.get_selected()
         finger_id = FINGERS[idx][0]
         finger_name = FINGERS[idx][1]
@@ -407,13 +452,45 @@ class CS9711Window(Adw.ApplicationWindow):
 
     def _enroll_done(self, message, success):
         self.enroll_progress.set_fraction(1.0 if success else 0)
-        self.enroll_progress.set_text(message)
         self.enroll_btn.set_sensitive(True)
         self.cancel_enroll_btn.set_visible(False)
         self._enroll_process = None
-        self.show_toast(message)
         if success:
+            self.enroll_progress.set_text("Enrollment complete! Now verify — touch the scanner...")
+            self.show_toast("Enrollment complete! Verifying...")
             self.refresh_status()
+            # Auto-trigger verification after successful enrollment
+            GLib.timeout_add(1500, self._auto_verify_after_enroll)
+        else:
+            self.enroll_progress.set_text(message)
+            self.show_toast(message)
+        return False
+
+    def _auto_verify_after_enroll(self):
+        """Auto-verify after enrollment to confirm the fingerprint works."""
+        self.verify_btn.set_sensitive(False)
+
+        def do_verify():
+            rc, out, err = run_cmd(["fprintd-verify"], timeout=30)
+            combined = f"{out}\n{err}".lower()
+            if "verify-match" in combined:
+                GLib.idle_add(self._post_enroll_verify_done, True)
+            else:
+                GLib.idle_add(self._post_enroll_verify_done, False)
+
+        threading.Thread(target=do_verify, daemon=True).start()
+        return False  # don't repeat
+
+    def _post_enroll_verify_done(self, success):
+        self.verify_btn.set_sensitive(True)
+        if success:
+            self.enroll_progress.set_text("Fingerprint verified! Everything is working.")
+            self.enroll_progress.set_fraction(1.0)
+            self.show_toast("Fingerprint verified! You're all set.")
+        else:
+            self.enroll_progress.set_text("Verification failed — try Test Verify again")
+            self.enroll_progress.set_fraction(0)
+            self.show_toast("Verification didn't match — try again with Test Verify")
         return False
 
     def on_cancel_enroll(self, btn):

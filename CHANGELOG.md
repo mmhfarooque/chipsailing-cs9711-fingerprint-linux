@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] - 2026-04-12
+
+### Added
+- **Enrollment status banner** — shows "Enrolled: 1 finger(s) enrolled: right-index-finger" or "Not Enrolled" with guidance to enroll
+- **Re-enroll confirmation** — if fingerprints already exist, clicking Enroll shows a dialog: "Fingerprints already enrolled. Add another finger?" instead of silently starting enrollment
+- **Auto-verify after enrollment** — after successful 15-touch enrollment, the GUI automatically asks you to touch the scanner to verify the fingerprint works, confirming everything is set up
+- **Dynamic button label** — "Enroll" changes to "Add Another Finger" when fingerprints are already enrolled
+
+### Fixed
+- **Empty desktop shortcut** — heredoc in install.sh was writing 0-byte .desktop file, making app invisible in launcher. Switched to echo.
+- **Native fingerprint icon** — uses `auth-fingerprint-symbolic` from Adwaita/Yaru instead of generic gear icon
+
+---
+
 ## [1.3.0] - 2026-04-12
 
 ### Changed
