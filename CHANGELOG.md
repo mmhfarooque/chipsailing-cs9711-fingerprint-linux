@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.5.1] - 2026-04-12
+
+### Fixed
+- **Welcome dialog showed even with fingers enrolled** — was triggered before refresh finished. Now triggers only after refresh confirms no fingers exist
+- **Enrollment Status stuck on "Checking..."** — `_apply_refresh` wasn't updating enrollment banner. Now properly shows "Enrolled: N finger(s)" or "Not Enrolled"
+- **Re-enrolling same finger failed** — fprintd-enroll fails if finger already enrolled. Now auto-deletes old enrollment for that finger before re-enrolling
+- **Enrollment progress text** — shows "Touch the scanner NOW" prominently during enrollment
+
+### Added
+- **Uninstall progress bar** — shows step-by-step progress: removing fingerprints → removing driver → cleaning up → removing project files → closing GUI
+- Uninstall shows 100% and "closing in 3 seconds" before auto-closing
+
+---
+
 ## [1.5.0] - 2026-04-12
 
 ### Added

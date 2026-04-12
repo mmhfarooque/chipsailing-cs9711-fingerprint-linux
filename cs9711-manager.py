@@ -232,10 +232,11 @@ class CS9711Window(Adw.ApplicationWindow):
         self.toolbar_view.set_content(self.toast_overlay)
         self.toast_overlay.set_child(content)
 
-        # Initial data load — then check if enrollment needed
+        # Track first refresh for enrollment prompt
+        self._first_refresh_done = False
+
+        # Initial data load — enrollment prompt triggers after refresh completes
         self.refresh_all()
-        # Show first-launch enrollment prompt after a short delay (let refresh finish)
-        GLib.timeout_add(2000, self._check_first_launch)
 
     def _check_first_launch(self):
         """Show enrollment prompt if no fingers enrolled."""
@@ -404,13 +405,19 @@ class CS9711Window(Adw.ApplicationWindow):
 
         self.enroll_progress.set_visible(True)
         self.enroll_progress.set_fraction(0)
-        self.enroll_progress.set_text(f"Enrolling {finger_name}... Touch the scanner")
+        self.enroll_progress.set_text(f"Preparing {finger_name}...")
         self.enroll_btn.set_sensitive(False)
         self.cancel_enroll_btn.set_visible(True)
         self._enroll_cancel = False
 
         def do_enroll():
             try:
+                # Delete existing enrollment for this finger first (avoids "already enrolled" error)
+                run_cmd(["fprintd-delete", os.environ.get("USER", "nobody"), finger_id], timeout=5)
+
+                self._enroll_progress_text = f"Enrolling {finger_name}... Touch the scanner NOW"
+                GLib.idle_add(lambda: (self.enroll_progress.set_text(self._enroll_progress_text), False)[-1])
+
                 self._enroll_process = subprocess.Popen(
                     ["fprintd-enroll", "-f", finger_id],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
@@ -892,8 +899,16 @@ class CS9711Window(Adw.ApplicationWindow):
         desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
         user = os.environ.get("USER", "nobody")
 
+        # Show progress bar
+        self.enroll_progress.set_visible(True)
+        self.enroll_progress.set_fraction(0)
+        self.enroll_progress.set_text("Uninstalling... removing fingerprints")
+
         def do_uninstall():
-            # Step 1: Write uninstall commands to a temp script (avoids multi-line pkexec issues)
+            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.1),
+                self.enroll_progress.set_text("Uninstalling... removing fingerprints"), False)[-1])
+
+            # Step 1: Write uninstall commands to a temp script
             tmp_script = "/tmp/cs9711-uninstall-now.sh"
             with open(tmp_script, "w") as f:
                 f.write("#!/bin/bash\n")
@@ -907,17 +922,29 @@ class CS9711Window(Adw.ApplicationWindow):
                 f.write("systemctl restart fprintd 2>/dev/null || true\n")
             os.chmod(tmp_script, 0o755)
 
+            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.3),
+                self.enroll_progress.set_text("Uninstalling... removing driver (enter password)"), False)[-1])
+
             # Step 2: Run via pkexec
             rc, out, err = run_cmd(["pkexec", tmp_script], timeout=120)
-            os.remove(tmp_script)
+            try:
+                os.remove(tmp_script)
+            except FileNotFoundError:
+                pass
 
-            # Step 2: Remove desktop shortcut (no sudo needed)
+            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.7),
+                self.enroll_progress.set_text("Uninstalling... cleaning up"), False)[-1])
+
+            # Step 3: Remove desktop shortcut
             try:
                 os.remove(desktop_file)
             except FileNotFoundError:
                 pass
 
-            # Step 3: Create cleanup script to delete project folder after GUI closes
+            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.9),
+                self.enroll_progress.set_text("Uninstalling... removing project files"), False)[-1])
+
+            # Step 4: Create cleanup script to delete project folder after GUI closes
             cleanup_script = "/tmp/cs9711-cleanup.sh"
             with open(cleanup_script, "w") as f:
                 f.write("#!/bin/bash\n")
@@ -929,8 +956,10 @@ class CS9711Window(Adw.ApplicationWindow):
             # Launch cleanup and close GUI
             subprocess.Popen([cleanup_script])
             def _done():
-                self.show_toast("Uninstall complete — everything removed. Closing...")
-                GLib.timeout_add(2000, lambda: self.close() or False)
+                self.enroll_progress.set_fraction(1.0)
+                self.enroll_progress.set_text("Uninstall complete — closing in 3 seconds...")
+                self.show_toast("Uninstall complete — everything removed")
+                GLib.timeout_add(3000, lambda: self.close() or False)
                 return False
             GLib.idle_add(_done)
 
@@ -1003,6 +1032,22 @@ class CS9711Window(Adw.ApplicationWindow):
             ", ".join(fingers) if fingers else "None enrolled"
         )
 
+        # Enrollment status banner + button label
+        if fingers:
+            self._has_enrolled_fingers = True
+            self.enroll_btn.set_label("Add Another Finger")
+            self.enroll_status_row.set_title("Enrolled")
+            self.enroll_status_row.set_subtitle(
+                f"{len(fingers)} finger(s): {', '.join(fingers)}"
+            )
+        else:
+            self._has_enrolled_fingers = False
+            self.enroll_btn.set_label("Enroll")
+            self.enroll_status_row.set_title("Not Enrolled")
+            self.enroll_status_row.set_subtitle(
+                "No fingerprints enrolled — click Enroll to get started"
+            )
+
         # Scan settings
         self.delay_adj.set_value(delay)
         self._original_delay = delay
@@ -1016,6 +1061,12 @@ class CS9711Window(Adw.ApplicationWindow):
         for name, row in self.auth_rows.items():
             enabled = auth_locs.get(name, False)
             row.set_subtitle("Enabled" if enabled else "Not configured")
+
+        # First-launch enrollment prompt — only once, only if no fingers enrolled
+        if not self._first_refresh_done:
+            self._first_refresh_done = True
+            if not fingers and scanner:
+                self._check_first_launch()
 
 
 # ============================================================================
