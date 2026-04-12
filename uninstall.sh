@@ -100,4 +100,16 @@ fi
 echo "=== Uninstall complete ==="
 echo ""
 echo "Stock libfprint restored. CS9711 will no longer be supported."
-echo "To reinstall later: ./install.sh"
+echo ""
+
+# Ask about full cleanup
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+read -p "Also delete the project folder ($SCRIPT_DIR)? [y/N] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "Removing project folder..."
+    rm -rf "$SCRIPT_DIR"
+    echo "Done. Everything removed."
+else
+    echo "Project folder kept. To reinstall later: ./install.sh"
+fi
