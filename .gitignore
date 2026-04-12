@@ -1,0 +1,8 @@
+# Built driver source (cloned during install)
+libfprint-CS9711/
+
+# Build artifacts
+builddir/
+*.o
+*.so
+*.so.*

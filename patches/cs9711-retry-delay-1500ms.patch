@@ -1,0 +1,13 @@
+diff --git a/libfprint/drivers/cs9711/cs9711.c b/libfprint/drivers/cs9711/cs9711.c
+index 49e0285..f813962 100644
+--- a/libfprint/drivers/cs9711/cs9711.c
++++ b/libfprint/drivers/cs9711/cs9711.c
+@@ -31,7 +31,7 @@ G_DEFINE_TYPE (FpDeviceCs9711, fpi_device_cs9711, FP_TYPE_IMAGE_DEVICE)
+ #define CS9711_SENSOR_HEIGHT 236
+ 
+ #define CS9711_DEFAULT_WAIT_TIMEOUT 300
+-#define CS9711_DEFAULT_RESET_SLEEP  250
++#define CS9711_DEFAULT_RESET_SLEEP  1500
+ 
+ #define CS9711_SEND_ENDPOINT    0x01
+ #define CS9711_RECEIVE_ENDPOINT 0x81
