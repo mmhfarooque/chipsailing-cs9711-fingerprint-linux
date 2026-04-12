@@ -342,13 +342,40 @@ class CS9711Window(Adw.ApplicationWindow):
                         GLib.idle_add(
                             self._enroll_update,
                             frac,
-                            f"Touch {touch_count}/15 — keep going",
+                            f"Touch {touch_count}/15 — good, keep going!",
                         )
                     elif "enroll-completed" in low:
                         GLib.idle_add(self._enroll_done, "Enrollment complete!", True)
                         return
+                    elif "enroll-retry-scan" in low or "retry" in low:
+                        GLib.idle_add(
+                            self._enroll_update,
+                            touch_count / 15.0,
+                            f"Touch {touch_count}/15 — bad read, try again",
+                        )
+                    elif "enroll-swipe-too-short" in low or "too short" in low:
+                        GLib.idle_add(
+                            self._enroll_update,
+                            touch_count / 15.0,
+                            f"Touch {touch_count}/15 — too short, hold longer",
+                        )
+                    elif "enroll-finger-not-centered" in low or "not centered" in low:
+                        GLib.idle_add(
+                            self._enroll_update,
+                            touch_count / 15.0,
+                            f"Touch {touch_count}/15 — center your finger",
+                        )
+                    elif "enroll-remove-and-retry" in low or "remove" in low:
+                        GLib.idle_add(
+                            self._enroll_update,
+                            touch_count / 15.0,
+                            f"Touch {touch_count}/15 — lift and touch again",
+                        )
                     elif "enroll-failed" in low or "enroll-unknown-error" in low:
-                        GLib.idle_add(self._enroll_done, f"Enrollment failed — try again", False)
+                        GLib.idle_add(self._enroll_done, "Enrollment failed — try again", False)
+                        return
+                    elif "enroll-data-full" in low:
+                        GLib.idle_add(self._enroll_done, "Storage full — delete old prints first", False)
                         return
                     # Ignore noise: fprintd debug lines like "ListEnrolledFingers failed"
 
