@@ -285,7 +285,7 @@ class CS9711Window(Adw.ApplicationWindow):
         self.enroll_progress = Gtk.ProgressBar(show_text=True, margin_top=8, margin_bottom=4,
                                                margin_start=12, margin_end=12)
         self.enroll_progress.set_fraction(0)
-        self.enroll_progress.set_text("Ready")
+        self.enroll_progress.set_text("")
         self.enroll_progress.set_visible(False)
         parent.append(self.enroll_progress)
 
@@ -335,7 +335,8 @@ class CS9711Window(Adw.ApplicationWindow):
                         GLib.idle_add(self._enroll_done, "Cancelled", False)
                         return
                     line = line.strip()
-                    if "enroll-stage-passed" in line.lower() or "stage passed" in line.lower():
+                    low = line.lower()
+                    if "enroll-stage-passed" in low or "stage passed" in low:
                         touch_count += 1
                         frac = min(touch_count / 15.0, 1.0)
                         GLib.idle_add(
@@ -343,12 +344,13 @@ class CS9711Window(Adw.ApplicationWindow):
                             frac,
                             f"Touch {touch_count}/15 — keep going",
                         )
-                    elif "enroll-completed" in line.lower() or "completed" in line.lower():
+                    elif "enroll-completed" in low:
                         GLib.idle_add(self._enroll_done, "Enrollment complete!", True)
                         return
-                    elif "enroll-failed" in line.lower() or "failed" in line.lower():
-                        GLib.idle_add(self._enroll_done, f"Failed: {line}", False)
+                    elif "enroll-failed" in low or "enroll-unknown-error" in low:
+                        GLib.idle_add(self._enroll_done, f"Enrollment failed — try again", False)
                         return
+                    # Ignore noise: fprintd debug lines like "ListEnrolledFingers failed"
 
                 self._enroll_process.wait()
                 if self._enroll_process.returncode == 0:
