@@ -385,8 +385,11 @@ class CS9711Window(Adw.ApplicationWindow):
 
         def do_enroll():
             try:
-                # Delete existing enrollment for this finger first (avoids "already enrolled" error)
-                run_cmd(["fprintd-delete", os.environ.get("USER", "nobody"), finger_id], timeout=5)
+                # Only delete existing enrollment for this finger if it's already enrolled
+                # (avoids a second unnecessary polkit password prompt on first enrollment)
+                enrolled = get_enrolled_fingers()
+                if finger_id in enrolled:
+                    run_cmd(["fprintd-delete", os.environ.get("USER", "nobody"), finger_id], timeout=5)
 
                 self._enroll_progress_text = f"Enrolling {finger_name}... Touch the scanner NOW"
                 GLib.idle_add(lambda: (self.enroll_progress.set_text(self._enroll_progress_text), False)[-1])
