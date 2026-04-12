@@ -8,7 +8,7 @@
 # Usage: ./reinstall.sh
 # ============================================================================
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRIVER_DIR="$SCRIPT_DIR/libfprint-CS9711"

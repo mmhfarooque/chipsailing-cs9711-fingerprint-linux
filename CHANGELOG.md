@@ -7,6 +7,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.6.0] - 2026-04-12
+
+### Security
+- **Shell injection in GUI uninstall** — user/path variables were written directly into temp shell scripts that run as root via pkexec. Now uses `shlex.quote()` to safely escape all values
+- **TOCTOU race condition** — uninstall and cleanup scripts used predictable filenames (`/tmp/cs9711-uninstall-now.sh`, `/tmp/cs9711-cleanup.sh`). A local attacker could replace the file between creation and pkexec execution for privilege escalation. Now uses `tempfile.mkstemp()` with randomised names and `0o700` permissions
+- **Cleanup script race** — project folder deletion used a fixed 2-second `sleep` delay. Now waits for the GUI process to actually exit (`kill -0` PID check loop) before deleting
+
+### Fixed
+- **GUI uninstall was x86_64 and apt-only** — the temp script only removed x86_64 library paths and ran `apt install --reinstall`. On arm64 or Fedora/Arch/openSUSE, the patched driver would remain and stock wouldn't be restored. Now matches the full multi-distro, multi-arch logic from `uninstall.sh`
+- **pkexec cancellation ignored** — if the user dismissed the password dialog during uninstall, the GUI continued anyway: removed the desktop shortcut and queued project folder deletion while the driver stayed installed. Now checks the return code and aborts cleanly with "Uninstall cancelled — no changes made"
+- **refresh_status() blocked the UI** — called `fprintd-list` and `lsusb` synchronously on the GTK main thread, freezing the window for seconds. Replaced with async `refresh_all()` which runs in a background thread
+- **install.sh hung when launched from GUI** — the `read -p "Continue anyway?"` prompt requires a terminal (stdin). When the GUI's "Full Install" button ran install.sh via pkexec, the prompt hung forever. Now detects non-interactive mode (`[ -t 0 ]`) and skips the prompt
+- **kill $PPID could kill wrong process** — after install, `kill -9 $PPID` was unconditional. If install.sh was launched from a script, IDE terminal, or the GUI, it would kill the wrong parent. Now checks that the parent is actually a shell (bash/zsh/sh/fish) before killing
+- **install.sh and reinstall.sh silently swallowed pipe failures** — used `set -e` but piped to `tail`, masking errors from `apt`/`meson`. Now uses `set -eo pipefail`
+
+### Improved
+- **Friendly finger names** — enrolled fingers now display as "Right index finger" instead of fprintd's raw "right-index-finger" format throughout the GUI
+- **Uninstall progress bar in correct location** — progress bar is now in the Maintenance section directly below the Uninstall button, not hidden in the Enrollment section
+
+---
+
 ## [1.5.1] - 2026-04-12
 
 ### Fixed

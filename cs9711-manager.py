@@ -9,9 +9,12 @@ driver maintenance. Uses GTK4 + libadwaita for native GNOME look.
 import gi
 import os
 import re
+import shlex
 import signal
 import subprocess
+import tempfile
 import threading
+import time
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -52,6 +55,8 @@ FINGERS = [
     ("right-little-finger", "Right little finger"),
     ("left-little-finger", "Left little finger"),
 ]
+
+FINGER_NAMES = {fid: fname for fid, fname in FINGERS}
 
 
 # ============================================================================
@@ -287,38 +292,6 @@ class CS9711Window(Adw.ApplicationWindow):
         self.status_fingers.add_prefix(Gtk.Image.new_from_icon_name("contact-new-symbolic"))
         group.add(self.status_fingers)
 
-    def refresh_status(self):
-        # Scanner
-        connected = is_scanner_connected()
-        self.status_scanner.set_subtitle(
-            "Connected (USB 2541:0236)" if connected else "Not detected — check USB"
-        )
-
-        # Driver
-        installed = is_driver_installed()
-        self.status_driver.set_subtitle(
-            "Installed and working" if installed else "Not installed or scanner not detected"
-        )
-
-        # Fingers
-        fingers = get_enrolled_fingers()
-        if fingers:
-            self.status_fingers.set_subtitle(", ".join(fingers))
-            self._has_enrolled_fingers = True
-            self.enroll_btn.set_label("Add Another Finger")
-            self.enroll_status_row.set_title("Enrolled")
-            self.enroll_status_row.set_subtitle(
-                f"{len(fingers)} finger(s) enrolled: {', '.join(fingers)}"
-            )
-        else:
-            self.status_fingers.set_subtitle("None enrolled")
-            self._has_enrolled_fingers = False
-            self.enroll_btn.set_label("Enroll")
-            self.enroll_status_row.set_title("Not Enrolled")
-            self.enroll_status_row.set_subtitle(
-                "No fingerprints enrolled yet — enroll below to get started"
-            )
-
     # ========================================================================
     # Enrollment Section
     # ========================================================================
@@ -497,7 +470,7 @@ class CS9711Window(Adw.ApplicationWindow):
         if success:
             self.enroll_progress.set_text("Enrollment complete! Now verify — touch the scanner...")
             self.show_toast("Enrollment complete! Verifying...")
-            self.refresh_status()
+            self.refresh_all()
             # Auto-trigger verification after successful enrollment
             GLib.timeout_add(1500, self._auto_verify_after_enroll)
         else:
@@ -586,7 +559,7 @@ class CS9711Window(Adw.ApplicationWindow):
             self.show_toast("All fingerprints deleted")
         else:
             self.show_toast(f"Delete failed: {err}")
-        self.refresh_status()
+        self.refresh_all()
 
     # ========================================================================
     # Scan Settings Section
@@ -834,6 +807,14 @@ class CS9711Window(Adw.ApplicationWindow):
         uninstall_row.add_suffix(uninstall_btn)
         group.add(uninstall_row)
 
+        # Uninstall progress bar (hidden until uninstall starts)
+        self.uninstall_progress = Gtk.ProgressBar(show_text=True, margin_top=8, margin_bottom=4,
+            margin_start=12, margin_end=12)
+        self.uninstall_progress.set_fraction(0)
+        self.uninstall_progress.set_text("")
+        self.uninstall_progress.set_visible(False)
+        parent.append(self.uninstall_progress)
+
         # Keyring
         keyring_row = Adw.ActionRow(
             title="GNOME Keyring Auto-Unlock",
@@ -899,41 +880,74 @@ class CS9711Window(Adw.ApplicationWindow):
         desktop_file = os.path.expanduser("~/.local/share/applications/cs9711-manager.desktop")
         user = os.environ.get("USER", "nobody")
 
-        # Show progress bar
-        self.enroll_progress.set_visible(True)
-        self.enroll_progress.set_fraction(0)
-        self.enroll_progress.set_text("Uninstalling... removing fingerprints")
+        # Show uninstall progress bar
+        self.uninstall_progress.set_visible(True)
+        self.uninstall_progress.set_fraction(0)
+        self.uninstall_progress.set_text("Uninstalling... removing fingerprints")
 
         def do_uninstall():
-            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.1),
-                self.enroll_progress.set_text("Uninstalling... removing fingerprints"), False)[-1])
+            def _update(fraction, text):
+                self.uninstall_progress.set_fraction(fraction)
+                self.uninstall_progress.set_text(text)
+                return False
 
-            # Step 1: Write uninstall commands to a temp script
-            tmp_script = "/tmp/cs9711-uninstall-now.sh"
-            with open(tmp_script, "w") as f:
-                f.write("#!/bin/bash\n")
-                f.write(f"fprintd-delete '{user}' 2>/dev/null || true\n")
-                f.write("rm -f /usr/local/lib/x86_64-linux-gnu/libfprint-2.so* 2>/dev/null\n")
-                f.write("rm -f /usr/local/lib/x86_64-linux-gnu/girepository-1.0/FPrint-2.0.typelib 2>/dev/null\n")
-                f.write("rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null\n")
-                f.write("ldconfig\n")
-                f.write("apt install --reinstall -y libfprint-2-2 2>/dev/null || true\n")
-                f.write("ldconfig\n")
-                f.write("systemctl restart fprintd 2>/dev/null || true\n")
-            os.chmod(tmp_script, 0o755)
+            GLib.idle_add(_update, 0.1, "Step 1/5 — Removing fingerprints...")
 
-            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.3),
-                self.enroll_progress.set_text("Uninstalling... removing driver (enter password)"), False)[-1])
-
-            # Step 2: Run via pkexec
-            rc, out, err = run_cmd(["pkexec", tmp_script], timeout=120)
+            # Step 1: Write uninstall commands to a secure temp script
+            fd, tmp_script = tempfile.mkstemp(prefix="cs9711-uninstall-", suffix=".sh")
             try:
-                os.remove(tmp_script)
-            except FileNotFoundError:
-                pass
+                with os.fdopen(fd, "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write(f"fprintd-delete {shlex.quote(user)} 2>/dev/null || true\n")
+                    # Remove patched libraries — all possible arch paths
+                    f.write("for libdir in"
+                            " /usr/local/lib/x86_64-linux-gnu"
+                            " /usr/local/lib/aarch64-linux-gnu"
+                            " /usr/local/lib/arm-linux-gnueabihf"
+                            " /usr/local/lib64"
+                            " /usr/local/lib; do\n")
+                    f.write("  rm -f \"$libdir\"/libfprint-2.so* 2>/dev/null\n")
+                    f.write("  rm -f \"$libdir\"/girepository-1.0/FPrint-2.0.typelib 2>/dev/null\n")
+                    f.write("done\n")
+                    f.write("ldconfig\n")
+                    # Reinstall stock libfprint — detect distro
+                    f.write("if command -v apt >/dev/null 2>&1; then\n")
+                    f.write("  apt install --reinstall -y libfprint-2-2 2>/dev/null || true\n")
+                    f.write("elif command -v dnf >/dev/null 2>&1; then\n")
+                    f.write("  dnf reinstall -y libfprint 2>/dev/null || true\n")
+                    f.write("elif command -v pacman >/dev/null 2>&1; then\n")
+                    f.write("  pacman -S --noconfirm libfprint 2>/dev/null || true\n")
+                    f.write("elif command -v zypper >/dev/null 2>&1; then\n")
+                    f.write("  zypper install -f -y libfprint-2-2 2>/dev/null || true\n")
+                    f.write("fi\n")
+                    f.write("ldconfig\n")
+                    f.write("systemctl restart fprintd 2>/dev/null || true\n")
+                os.chmod(tmp_script, 0o700)
 
-            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.7),
-                self.enroll_progress.set_text("Uninstalling... cleaning up"), False)[-1])
+                GLib.idle_add(_update, 0.3, "Step 2/5 — Removing driver (enter password)...")
+
+                # Step 2: Run via pkexec
+                rc, out, err = run_cmd(["pkexec", tmp_script], timeout=120)
+            finally:
+                try:
+                    os.remove(tmp_script)
+                except FileNotFoundError:
+                    pass
+
+            # Abort if user cancelled pkexec or script failed
+            if rc != 0:
+                def _aborted():
+                    self.uninstall_progress.set_fraction(0)
+                    self.uninstall_progress.set_text("Uninstall cancelled — no changes made")
+                    self.show_toast("Uninstall cancelled")
+                    return False
+                GLib.idle_add(_aborted)
+                return
+
+            GLib.idle_add(_update, 0.5, "Step 3/5 — Restoring stock driver...")
+            time.sleep(0.5)
+
+            GLib.idle_add(_update, 0.7, "Step 4/5 — Removing desktop shortcut...")
 
             # Step 3: Remove desktop shortcut
             try:
@@ -941,23 +955,23 @@ class CS9711Window(Adw.ApplicationWindow):
             except FileNotFoundError:
                 pass
 
-            GLib.idle_add(lambda: (self.enroll_progress.set_fraction(0.9),
-                self.enroll_progress.set_text("Uninstalling... removing project files"), False)[-1])
+            GLib.idle_add(_update, 0.9, "Step 5/5 — Removing project files...")
 
-            # Step 4: Create cleanup script to delete project folder after GUI closes
-            cleanup_script = "/tmp/cs9711-cleanup.sh"
-            with open(cleanup_script, "w") as f:
+            # Step 4: Create cleanup script to delete project folder after GUI exits
+            # Uses a PID wait so it only deletes after the GUI process is fully gone
+            fd2, cleanup_script = tempfile.mkstemp(prefix="cs9711-cleanup-", suffix=".sh")
+            with os.fdopen(fd2, "w") as f:
                 f.write("#!/bin/bash\n")
-                f.write("sleep 2\n")
-                f.write(f"rm -rf '{project_dir}'\n")
-                f.write(f"rm -f '{cleanup_script}'\n")
-            os.chmod(cleanup_script, 0o755)
+                f.write(f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.5; done\n")
+                f.write(f"rm -rf {shlex.quote(project_dir)}\n")
+                f.write(f"rm -f {shlex.quote(cleanup_script)}\n")
+            os.chmod(cleanup_script, 0o700)
 
             # Launch cleanup and close GUI
             subprocess.Popen([cleanup_script])
             def _done():
-                self.enroll_progress.set_fraction(1.0)
-                self.enroll_progress.set_text("Uninstall complete — closing in 3 seconds...")
+                self.uninstall_progress.set_fraction(1.0)
+                self.uninstall_progress.set_text("Uninstall complete — closing in 3 seconds...")
                 self.show_toast("Uninstall complete — everything removed")
                 GLib.timeout_add(3000, lambda: self.close() or False)
                 return False
@@ -1028,8 +1042,9 @@ class CS9711Window(Adw.ApplicationWindow):
         self.status_driver.set_subtitle(
             "Installed and working" if driver else "Not installed or scanner not detected"
         )
+        friendly_fingers = [FINGER_NAMES.get(f, f) for f in fingers]
         self.status_fingers.set_subtitle(
-            ", ".join(fingers) if fingers else "None enrolled"
+            ", ".join(friendly_fingers) if fingers else "None enrolled"
         )
 
         # Enrollment status banner + button label
@@ -1038,7 +1053,7 @@ class CS9711Window(Adw.ApplicationWindow):
             self.enroll_btn.set_label("Add Another Finger")
             self.enroll_status_row.set_title("Enrolled")
             self.enroll_status_row.set_subtitle(
-                f"{len(fingers)} finger(s): {', '.join(fingers)}"
+                f"{len(fingers)} finger(s): {', '.join(friendly_fingers)}"
             )
         else:
             self._has_enrolled_fingers = False

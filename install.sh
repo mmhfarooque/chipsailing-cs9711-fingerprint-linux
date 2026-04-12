@@ -12,7 +12,7 @@
 #   ./install.sh
 # ============================================================================
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRIVER_DIR="$SCRIPT_DIR/libfprint-CS9711"
@@ -212,9 +212,14 @@ else
     warn "CS9711 scanner NOT detected on USB"
     echo "       Make sure it's plugged in. If using a keyboard passthrough,"
     echo "       the keyboard must be connected via USB cable (not wireless)."
-    read -p "  Continue anyway? [y/N] " -n 1 -r
-    echo
-    [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+    if [ -t 0 ]; then
+        read -p "  Continue anyway? [y/N] " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+    else
+        # Non-interactive (e.g. launched from GUI) — continue automatically
+        info "Non-interactive mode — continuing without scanner"
+    fi
 fi
 echo ""
 
@@ -388,10 +393,24 @@ if [ -f "$SCRIPT_DIR/cs9711-manager.py" ]; then
     disown
 fi
 
-echo "  Terminal will close in 5 seconds — the GUI handles everything now."
-echo ""
-sleep 5
-
-# Kill the parent terminal so it doesn't stay inside the project folder
-# This prevents uninstall issues (folder "in use")
-kill -9 $PPID 2>/dev/null || true
+# Only close the terminal if we're running interactively in a terminal emulator.
+# This prevents killing the wrong parent when launched from GUI, scripts, or IDEs.
+if [ -t 0 ] && [ -n "$PPID" ]; then
+    PARENT_NAME=$(ps -o comm= -p "$PPID" 2>/dev/null || echo "")
+    case "$PARENT_NAME" in
+        bash|zsh|sh|dash|fish)
+            # Parent is a shell inside a terminal — safe to close
+            echo "  Terminal will close in 5 seconds — the GUI handles everything now."
+            echo ""
+            sleep 5
+            kill -9 $PPID 2>/dev/null || true
+            ;;
+        *)
+            echo "  You can close this terminal — the GUI handles everything now."
+            echo ""
+            ;;
+    esac
+else
+    echo "  Installation complete. The GUI is now running."
+    echo ""
+fi
