@@ -1,8 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=CS9711 Fingerprint Manager
-Comment=Configure Chipsailing CS9711 fingerprint scanner settings
-Exec=python3 /opt/cs9711-fingerprint/cs9711-manager.py
+Comment=Configure Chipsailing CS9711 fingerprint scanner
+# NOTE: This is a template. Run ./setup-gui.sh to install with the correct path.
+# Exec will be set to your actual clone location by setup-gui.sh
+Exec=python3 cs9711-manager.py
 Icon=fingerprint-symbolic
 Terminal=false
 Categories=Settings;HardwareSettings;System;

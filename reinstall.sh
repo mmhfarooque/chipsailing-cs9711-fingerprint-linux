@@ -18,7 +18,10 @@ echo "=== CS9711 Quick Reinstall ==="
 echo ""
 
 if [ ! -d "$DRIVER_DIR/libfprint/drivers/cs9711" ]; then
-    echo "Driver source not found. Run ./install.sh first for a fresh install."
+    echo "Error: Driver source not found at $DRIVER_DIR"
+    echo ""
+    echo "This script is for REBUILDING after system updates — not for initial setup."
+    echo "Run ./install.sh first to do a fresh installation."
     exit 1
 fi
 

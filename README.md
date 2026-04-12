@@ -37,7 +37,7 @@ The installer auto-detects your distro and uses the right package manager.
 ```bash
 git clone https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux.git
 cd chipsailing-cs9711-fingerprint-linux
-chmod +x install.sh
+chmod +x install.sh setup-gui.sh
 ./install.sh
 ```
 
@@ -57,6 +57,31 @@ Then enroll your fingerprint:
 fprintd-enroll          # 15 touches required
 fprintd-verify          # test it
 ```
+
+## Complete Setup (Driver + GUI)
+
+For the full experience — driver install, enrollment, and graphical manager:
+
+```bash
+git clone https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux.git
+cd chipsailing-cs9711-fingerprint-linux
+chmod +x install.sh setup-gui.sh
+
+# Step 1: Install driver (builds from source, configures PAM)
+./install.sh
+
+# Step 2: Enroll your fingerprint (15 touches)
+fprintd-enroll
+fprintd-verify
+
+# Step 3: Install GUI manager (adds desktop shortcut)
+./setup-gui.sh
+
+# Step 4: Launch — or search "CS9711" in your app menu
+python3 cs9711-manager.py
+```
+
+After setup, you can manage everything from the GUI — enrollment, retry delay, PAM settings, and driver maintenance.
 
 ## Install via .deb Package (Ubuntu / Debian / Mint / Pop!_OS)
 

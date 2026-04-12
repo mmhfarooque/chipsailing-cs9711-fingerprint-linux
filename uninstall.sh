@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # CS9711 Uninstall — Remove the patched driver and restore stock libfprint
+# Supports: Ubuntu/Debian, Fedora/RHEL, Arch, openSUSE
 # ============================================================================
 
 set -e
@@ -9,29 +10,86 @@ echo ""
 echo "=== CS9711 Fingerprint Driver — Uninstall ==="
 echo ""
 
+# Detect distro
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    case "$ID" in
+        ubuntu|debian|linuxmint|pop|elementary|zorin|kali|raspbian) PKG_FAMILY="apt" ;;
+        fedora|rhel|centos|rocky|alma|nobara) PKG_FAMILY="dnf" ;;
+        arch|manjaro|endeavouros|garuda|artix) PKG_FAMILY="pacman" ;;
+        opensuse*|sles) PKG_FAMILY="zypper" ;;
+        *)
+            case "$ID_LIKE" in
+                *debian*|*ubuntu*) PKG_FAMILY="apt" ;;
+                *fedora*|*rhel*)   PKG_FAMILY="dnf" ;;
+                *arch*)            PKG_FAMILY="pacman" ;;
+                *suse*)            PKG_FAMILY="zypper" ;;
+                *)                 PKG_FAMILY="unknown" ;;
+            esac
+            ;;
+    esac
+else
+    PKG_FAMILY="unknown"
+fi
+
+# Detect library path
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)  LIB_ARCH="x86_64-linux-gnu" ;;
+    aarch64) LIB_ARCH="aarch64-linux-gnu" ;;
+    armv7l)  LIB_ARCH="arm-linux-gnueabihf" ;;
+    *)       LIB_ARCH="$ARCH-linux-gnu" ;;
+esac
+
 # Remove enrolled fingerprints
 echo "[1/4] Removing enrolled fingerprints..."
 fprintd-delete "$(whoami)" 2>/dev/null && echo "  Fingerprints deleted" || echo "  No fingerprints to delete"
 echo ""
 
-# Remove the patched library
-echo "[2/4] Removing patched libfprint from /usr/local/..."
-sudo rm -f /usr/local/lib/x86_64-linux-gnu/libfprint-2.so*
-sudo rm -f /usr/local/lib/x86_64-linux-gnu/girepository-1.0/FPrint-2.0.typelib
+# Remove the patched library (check multiple possible locations)
+echo "[2/4] Removing patched libfprint..."
+sudo rm -f "/usr/local/lib/$LIB_ARCH/libfprint-2.so"* 2>/dev/null
+sudo rm -f "/usr/local/lib/$LIB_ARCH/girepository-1.0/FPrint-2.0.typelib" 2>/dev/null
+sudo rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null
+sudo rm -f /usr/local/lib64/girepository-1.0/FPrint-2.0.typelib 2>/dev/null
+sudo rm -f /usr/local/lib/libfprint-2.so* 2>/dev/null
 sudo ldconfig
 echo "  Patched library removed"
 echo ""
 
 # Reinstall stock libfprint
 echo "[3/4] Reinstalling stock libfprint..."
-sudo apt install --reinstall -y libfprint-2-2 2>&1 | tail -3
+case "$PKG_FAMILY" in
+    apt)
+        sudo apt install --reinstall -y libfprint-2-2 2>&1 | tail -3
+        ;;
+    dnf)
+        sudo dnf reinstall -y libfprint 2>&1 | tail -3
+        ;;
+    pacman)
+        sudo pacman -S --noconfirm libfprint 2>&1 | tail -3
+        ;;
+    zypper)
+        sudo zypper install -f -y libfprint-2-2 2>&1 | tail -3
+        ;;
+    *)
+        echo "  Unknown distro — please reinstall libfprint manually"
+        ;;
+esac
 sudo ldconfig
 echo ""
 
 # Restart fprintd
 echo "[4/4] Restarting fprintd..."
-sudo systemctl restart fprintd
+sudo systemctl restart fprintd 2>/dev/null || true
 echo ""
+
+# Remove desktop shortcut if present
+DESKTOP_FILE="$HOME/.local/share/applications/cs9711-manager.desktop"
+if [ -f "$DESKTOP_FILE" ]; then
+    rm -f "$DESKTOP_FILE"
+    echo "  GUI desktop shortcut removed"
+fi
 
 echo "=== Uninstall complete ==="
 echo ""

@@ -28,6 +28,9 @@ elif command -v pacman &>/dev/null; then
 elif command -v zypper &>/dev/null; then
     echo "[1/3] Installing GTK4 Python dependencies (zypper)..."
     sudo zypper install -y python3-gobject typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 2>&1 | tail -3
+else
+    echo "[1/3] Unknown package manager — install these manually:"
+    echo "       python3-gi (PyGObject), GTK4, libadwaita"
 fi
 echo ""
 
