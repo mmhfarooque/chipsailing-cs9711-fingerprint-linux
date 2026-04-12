@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.5.0] - 2026-04-12
+
+### Added
+- **First-launch enrollment prompt** — when GUI opens with no enrolled fingers, shows a welcome dialog explaining what's about to happen, which finger will be scanned, and how to change it for left-handers
+- **Apply PAM shows "Applying..." spinner** — button disables and shows progress text while running
+- **Password requirement note** — "Requires your login password" shown next to Apply PAM button so users aren't surprised by the password prompt after just scanning their finger
+
+### Fixed
+- **Multiple instances bug** — clicking the app icon while GUI is open no longer launches a second instance. Uses GApplication single-instance to bring existing window to front
+- **Terminal stays in project folder** — script can't cd parent shell, so now shows "Run 'cd ~' or close this terminal" message
+- **GUI uninstall failing** — multi-line pkexec string was breaking. Now uses temp script file
+
+---
+
 ## [1.4.1] - 2026-04-12
 
 ### Changed

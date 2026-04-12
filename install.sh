@@ -388,5 +388,6 @@ if [ -f "$SCRIPT_DIR/cs9711-manager.py" ]; then
     disown
 fi
 
-# Move terminal back to home so the project folder isn't "in use"
-cd "$HOME"
+# Tell user to cd home (can't change parent shell's directory from a script)
+echo "  Run 'cd ~' or close this terminal — the GUI handles everything now."
+echo ""

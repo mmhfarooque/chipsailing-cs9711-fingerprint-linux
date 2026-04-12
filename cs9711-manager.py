@@ -174,8 +174,13 @@ class CS9711ManagerApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
         self.connect("activate", self.on_activate)
+        self.win = None
 
     def on_activate(self, app):
+        # Single instance — if window exists, just bring it to front
+        if self.win is not None:
+            self.win.present()
+            return
         self.win = CS9711Window(application=app)
         self.win.present()
 
@@ -227,8 +232,35 @@ class CS9711Window(Adw.ApplicationWindow):
         self.toolbar_view.set_content(self.toast_overlay)
         self.toast_overlay.set_child(content)
 
-        # Initial data load
+        # Initial data load — then check if enrollment needed
         self.refresh_all()
+        # Show first-launch enrollment prompt after a short delay (let refresh finish)
+        GLib.timeout_add(2000, self._check_first_launch)
+
+    def _check_first_launch(self):
+        """Show enrollment prompt if no fingers enrolled."""
+        if not self._has_enrolled_fingers and is_scanner_connected():
+            dialog = Adw.AlertDialog(
+                heading="Welcome! Let's set up your fingerprint",
+                body=(
+                    "Your CS9711 scanner is connected and the driver is installed.\n\n"
+                    "To start using fingerprint login, you need to enroll a finger. "
+                    "This takes 15 touches on the scanner.\n\n"
+                    "By default, your RIGHT INDEX FINGER will be enrolled. "
+                    "If you're left-handed, you can change the finger in the dropdown below the Enroll button.\n\n"
+                    "Click 'Start Enrollment' to begin — then place your finger on the scanner when prompted."
+                ),
+            )
+            dialog.add_response("later", "Later")
+            dialog.add_response("enroll", "Start Enrollment")
+            dialog.set_response_appearance("enroll", Adw.ResponseAppearance.SUGGESTED)
+            dialog.connect("response", self._on_first_launch_response)
+            dialog.present(self)
+        return False  # don't repeat
+
+    def _on_first_launch_response(self, dialog, response):
+        if response == "enroll":
+            self._start_enroll()
 
     def show_toast(self, message):
         toast = Adw.Toast(title=message, timeout=3)
@@ -676,8 +708,11 @@ class CS9711Window(Adw.ApplicationWindow):
         )
         group.add(self.timeout_row)
 
-        # Apply button
-        apply_row = Adw.ActionRow(title="")
+        # Apply button with note about password
+        apply_row = Adw.ActionRow(
+            title="",
+            subtitle="Requires your login password (system files need admin access)",
+        )
         self.pam_apply_btn = Gtk.Button(
             label="Apply PAM Settings", css_classes=["suggested-action"],
             valign=Gtk.Align.CENTER
@@ -690,20 +725,30 @@ class CS9711Window(Adw.ApplicationWindow):
         max_tries = int(self.tries_adj.get_value())
         timeout = int(self.timeout_adj.get_value())
 
-        _, _, pam_file = get_pam_settings()
-        if not pam_file:
-            # Try common-auth as default
-            pam_file = "/etc/pam.d/common-auth"
+        btn.set_sensitive(False)
+        btn.set_label("Applying...")
 
-        cmd = (
-            f"sed -i 's/pam_fprintd.so.*/pam_fprintd.so "
-            f"max-tries={max_tries} timeout={timeout}/' '{pam_file}'"
-        )
-        rc, _, err = run_as_root(cmd)
-        if rc == 0:
-            self.show_toast(f"PAM updated: {max_tries} tries, {timeout}s timeout")
-        else:
-            self.show_toast(f"Failed: {err[:80]}")
+        def do_apply():
+            _, _, pam_file = get_pam_settings()
+            if not pam_file:
+                pam_file = "/etc/pam.d/common-auth"
+
+            cmd = (
+                f"sed -i 's/pam_fprintd.so.*/pam_fprintd.so "
+                f"max-tries={max_tries} timeout={timeout}/' '{pam_file}'"
+            )
+            rc, _, err = run_as_root(cmd)
+            def _done():
+                btn.set_sensitive(True)
+                btn.set_label("Apply PAM Settings")
+                if rc == 0:
+                    self.show_toast(f"PAM updated: {max_tries} tries, {timeout}s timeout")
+                else:
+                    self.show_toast(f"Failed: {err[:80]}")
+                return False
+            GLib.idle_add(_done)
+
+        threading.Thread(target=do_apply, daemon=True).start()
 
     # ========================================================================
     # Auth Locations Section
