@@ -22,14 +22,20 @@ lsusb | grep 2541:0236
 
 ### Important: USB Connection Requirement
 
-If your fingerprint scanner is plugged into a **keyboard's USB passthrough port** (e.g. Royal Kludge RK84, or any keyboard with a USB-A port on it):
+This USB fingerprint sensor can be connected in two ways:
 
-- **Wired (USB-C cable):** The scanner **WILL work**. The keyboard's USB passthrough hub is powered and active when connected via cable to the PC.
-- **Bluetooth / 2.4GHz wireless:** The scanner **WILL NOT work**. When the keyboard is connected wirelessly, the USB passthrough hub has no data connection to the PC — the scanner gets power but cannot communicate.
+**Option 1: Directly to the PC** — Plug the scanner into any USB port on your computer (front panel, rear I/O, USB hub connected to the PC). This always works.
 
-**Fix:** Connect your keyboard to the PC with a USB cable. The scanner plugged into the keyboard's USB-A port will then be detected.
+**Option 2: Via a keyboard's USB passthrough port** — Many mechanical keyboards (e.g. Royal Kludge RK84) have a USB-A port on the back for plugging in peripherals like this scanner. **This only works if the keyboard is connected to the PC via USB cable.** If the keyboard is connected via Bluetooth or 2.4GHz wireless, the keyboard's USB port is dead — the scanner may light up (it gets power) but the PC cannot see it (no data connection).
 
-This is a hardware limitation of keyboard USB passthrough — it only works when the keyboard itself is wired. This applies to **any** USB device plugged into a keyboard passthrough port, not just fingerprint scanners.
+| Connection | Scanner works? |
+|---|---|
+| Scanner → PC USB port directly | Yes, always |
+| Scanner → Keyboard USB port, keyboard wired to PC | Yes |
+| Scanner → Keyboard USB port, keyboard on Bluetooth | **No** — no data, only power |
+| Scanner → Keyboard USB port, keyboard on 2.4GHz wireless | **No** — no data, only power |
+
+If `lsusb | grep 2541:0236` shows nothing, check your USB connection first.
 
 ## Supported Distros
 
