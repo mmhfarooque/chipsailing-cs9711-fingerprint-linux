@@ -393,6 +393,7 @@ class CS9711Window(Adw.ApplicationWindow):
     def _enroll_update(self, fraction, text):
         self.enroll_progress.set_fraction(fraction)
         self.enroll_progress.set_text(text)
+        return False
 
     def _enroll_done(self, message, success):
         self.enroll_progress.set_fraction(1.0 if success else 0)
@@ -403,6 +404,7 @@ class CS9711Window(Adw.ApplicationWindow):
         self.show_toast(message)
         if success:
             self.refresh_status()
+        return False
 
     def on_cancel_enroll(self, btn):
         self._enroll_cancel = True
@@ -436,6 +438,7 @@ class CS9711Window(Adw.ApplicationWindow):
         self.enroll_progress.set_fraction(1.0 if success else 0)
         self.verify_btn.set_sensitive(True)
         self.show_toast(message)
+        return False
 
     def on_delete_fingers(self, btn):
         dialog = Adw.AlertDialog(
@@ -555,6 +558,7 @@ class CS9711Window(Adw.ApplicationWindow):
             self.rebuild_notice.set_visible(False)
         self.show_toast(message)
         self.refresh_status()
+        return False
 
     # ========================================================================
     # PAM Settings Section
@@ -752,11 +756,13 @@ class CS9711Window(Adw.ApplicationWindow):
         def do_uninstall():
             rc, out, err = run_cmd(["pkexec", "bash", script], timeout=120)
             if rc == 0:
-                GLib.idle_add(
-                    lambda: (self.show_toast("Driver uninstalled"), self.refresh_all())
-                )
+                def _done():
+                    self.show_toast("Driver uninstalled")
+                    self.refresh_all()
+                    return False
+                GLib.idle_add(_done)
             else:
-                GLib.idle_add(lambda: self.show_toast(f"Uninstall failed: {err[:80]}"))
+                GLib.idle_add(lambda: (self.show_toast(f"Uninstall failed: {err[:80]}"), False)[-1])
 
         threading.Thread(target=do_uninstall, daemon=True).start()
 
@@ -774,6 +780,7 @@ class CS9711Window(Adw.ApplicationWindow):
         self.show_toast(message)
         if success:
             self.refresh_all()
+        return False
 
     # ========================================================================
     # Refresh all

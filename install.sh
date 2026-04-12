@@ -220,6 +220,10 @@ echo ""
 
 # ---- Step 1: Dependencies ----
 echo "[1/7] Installing build dependencies via $PKG_FAMILY..."
+if ! declare -f "install_deps_$PKG_FAMILY" &>/dev/null; then
+    fail "No installer defined for package manager: $PKG_FAMILY"
+    exit 1
+fi
 install_deps_$PKG_FAMILY
 ok "Dependencies installed"
 echo ""

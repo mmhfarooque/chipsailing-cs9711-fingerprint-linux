@@ -25,14 +25,21 @@ if [ ! -d "$DRIVER_DIR/libfprint/drivers/cs9711" ]; then
     exit 1
 fi
 
+# Verify source file exists
+CS9711_SRC="$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"
+if [ ! -f "$CS9711_SRC" ]; then
+    echo "Error: cs9711.c not found at $CS9711_SRC"
+    echo "The driver source structure may have changed. Run ./install.sh for a fresh install."
+    exit 1
+fi
+
 # Verify patch is still applied
 echo "[1/4] Checking patches..."
-if grep -q "CS9711_DEFAULT_RESET_SLEEP  1500" "$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"; then
+if grep -q "CS9711_DEFAULT_RESET_SLEEP  1500" "$CS9711_SRC"; then
     echo "  Retry delay patch OK"
 else
     echo "  Re-applying retry delay patch..."
-    sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' \
-        "$DRIVER_DIR/libfprint/drivers/cs9711/cs9711.c"
+    sed -i 's/#define CS9711_DEFAULT_RESET_SLEEP.*/#define CS9711_DEFAULT_RESET_SLEEP  1500/' "$CS9711_SRC"
 fi
 
 # Make doctest optional
