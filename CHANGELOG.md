@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.0] - 2026-04-12
+
+### Changed
+- **GUI Manager now installs automatically** — `install.sh` step 8/8 installs GTK4 deps, creates desktop shortcut, no separate `setup-gui.sh` needed
+- Install completion message now shows the GUI launch command (`python3 cs9711-manager.py`)
+- Install completion message now shows uninstall command (`./uninstall.sh`)
+
+### Fixed
+- GUI shortcut was not created during install — users searching "CS9711" in app launcher found nothing
+- Completion message had no way to launch GUI or uninstall
+
+### Improved
+- `uninstall.sh` now asks whether to also delete the project folder for full cleanup (`y/N` prompt)
+- Steps renumbered from 7 to 8 across all install output
+
+---
+
 ## [1.2.1] - 2026-04-12
 
 ### Fixed
