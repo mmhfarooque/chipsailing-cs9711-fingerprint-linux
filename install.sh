@@ -149,14 +149,55 @@ get_lib_path() {
 # Configure PAM (distro-aware)
 # ============================================================================
 configure_pam() {
-    # Debian/Ubuntu use common-auth, Fedora/Arch use system-auth or fingerprint-auth
+    # 1) Debian/Ubuntu canonical path: edit /usr/share/pam-configs/fprintd
+    #    and let pam-auth-update wire it into the PAM stack. This is the only
+    #    method that survives package upgrades and pam-auth-update regenerations.
+    if command -v pam-auth-update &>/dev/null && [ -f /usr/share/pam-configs/fprintd ]; then
+        # Replace shipped "max-tries=1 timeout=10 # debug" with sensible defaults.
+        # Use a tolerant regex so future profile tweaks don't break us.
+        if ! grep -q "max-tries=7 timeout=30" /usr/share/pam-configs/fprintd; then
+            sudo sed -i -E \
+                's/(pam_fprintd\.so)[[:space:]]+max-tries=[0-9]+[[:space:]]+timeout=[0-9]+([[:space:]]+#[[:space:]]*debug)?/\1 max-tries=7 timeout=30/' \
+                /usr/share/pam-configs/fprintd
+            ok "Set max-tries=7 timeout=30 in /usr/share/pam-configs/fprintd"
+        else
+            ok "/usr/share/pam-configs/fprintd already at max-tries=7 timeout=30"
+        fi
+
+        # Enable in the PAM stack — idempotent, safe to run repeatedly.
+        # --package uses stored selections; --enable forces fprintd on.
+        sudo pam-auth-update --enable fprintd
+        ok "Fingerprint auth enabled in PAM stack via pam-auth-update"
+        return
+    fi
+
+    # 2) Fedora/RHEL canonical path: authselect
+    if command -v authselect &>/dev/null; then
+        if authselect current 2>/dev/null | grep -q "with-fingerprint"; then
+            ok "Fingerprint auth already enabled via authselect"
+        else
+            info "Enabling fingerprint auth via authselect..."
+            sudo authselect enable-feature with-fingerprint 2>/dev/null \
+                && ok "authselect: with-fingerprint enabled" \
+                || warn "authselect fingerprint enable failed — configure manually"
+        fi
+        # Also bump the system-auth max-tries if the line is present
+        for PAM_FILE in /etc/pam.d/system-auth /etc/pam.d/fingerprint-auth; do
+            if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE" \
+                    && ! grep -q "max-tries=7" "$PAM_FILE"; then
+                sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
+                ok "PAM updated in $PAM_FILE: max-tries=7 timeout=30"
+            fi
+        done
+        return
+    fi
+
+    # 3) Fallback: direct edit of any /etc/pam.d/* file that already references fprintd
     PAM_FILES=(
         "/etc/pam.d/common-auth"
         "/etc/pam.d/system-auth"
         "/etc/pam.d/fingerprint-auth"
     )
-
-    PAM_CONFIGURED=false
     for PAM_FILE in "${PAM_FILES[@]}"; do
         if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE"; then
             if grep -q "max-tries=7" "$PAM_FILE"; then
@@ -165,26 +206,12 @@ configure_pam() {
                 sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
                 ok "PAM updated in $PAM_FILE: max-tries=7 timeout=30"
             fi
-            PAM_CONFIGURED=true
-            break
+            return
         fi
     done
 
-    if [ "$PAM_CONFIGURED" = false ]; then
-        # Check if authselect is used (Fedora/RHEL)
-        if command -v authselect &>/dev/null; then
-            if authselect current 2>/dev/null | grep -q "with-fingerprint"; then
-                ok "Fingerprint auth enabled via authselect"
-            else
-                info "Enabling fingerprint auth via authselect..."
-                sudo authselect enable-feature with-fingerprint 2>/dev/null || \
-                    warn "authselect fingerprint enable failed — configure manually"
-            fi
-        else
-            warn "pam_fprintd not found in PAM config"
-            echo "       You may need to configure PAM manually for your distro."
-        fi
-    fi
+    warn "Could not auto-configure PAM (no pam-auth-update, no authselect, no existing pam_fprintd line)"
+    echo "       Configure manually for your distro — see README.md"
 }
 
 # ============================================================================
@@ -332,6 +359,17 @@ fi
 if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
     ok "CS9711 scanner detected by fprintd!"
     fprintd-list "$REAL_USER" 2>&1 | sed 's/^/    /'
+
+    # Detect existing enrollment — likely stale if it pre-dates this build of
+    # the patched driver, since template timing/format can differ. We don't
+    # auto-delete (could destroy a working enrollment), but we tell the user.
+    if fprintd-list "$REAL_USER" 2>&1 | grep -qE '^\s*-\s*#[0-9]+:'; then
+        warn "Existing enrolled fingerprint(s) detected"
+        echo "       If this driver was just freshly built (or you previously"
+        echo "       used an older driver), the old template will likely fail"
+        echo "       'verify-no-match'. Re-enroll for a clean template:"
+        echo "         fprintd-delete \$(whoami) && fprintd-enroll"
+    fi
 else
     warn "Scanner not yet detected by fprintd"
     echo "       Try: fprintd-list \$(whoami)"

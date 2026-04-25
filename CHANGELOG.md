@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.2] - 2026-04-25
+
+### Fixed
+- **PAM never enabled on a fresh Debian/Ubuntu install** — `configure_pam()` only edited an existing `pam_fprintd.so` line in `/etc/pam.d/common-auth`, but on a fresh install that line doesn't exist yet (the `libpam-fprintd` profile at `/usr/share/pam-configs/fprintd` ships disabled by default with `Default: no`). The script silently skipped PAM configuration, leaving fingerprint working only for `fprintd-verify` while `sudo`, lock screen, and SDDM never even tried it. The Fedora branch handled this via `authselect enable-feature with-fingerprint`; Ubuntu had no equivalent. Now also runs `pam-auth-update --enable fprintd` and bumps `max-tries=7 timeout=30` directly in the source pam-configs profile so the change survives package upgrades.
+
+### Added
+- **Stale-enrollment warning in step 6** — if `fprintd-list` shows an enrolled fingerprint after a fresh driver build, the installer now warns that templates from a previous driver version typically `verify-no-match` against the new build, and prints the exact `fprintd-delete && fprintd-enroll` command to re-enroll cleanly. Doesn't auto-delete (could destroy a working enrollment from the same driver build).
+
+---
+
 ## [1.8.1] - 2026-04-12
 
 ### Fixed
