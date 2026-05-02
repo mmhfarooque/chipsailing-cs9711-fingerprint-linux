@@ -41,11 +41,13 @@ If `lsusb | grep 2541:0236` shows nothing, check your USB connection first.
 
 | Distro Family | Tested On | Package Manager |
 |---------------|-----------|-----------------|
-| **Ubuntu / Debian** | Ubuntu 24.04, 26.04, Debian 12+ | apt |
+| **Ubuntu / Kubuntu / Debian** | Ubuntu 24.04, Ubuntu 26.04, Kubuntu 26.04 LTS (Plasma 6.6.4), Debian 12+ | apt |
 | **Linux Mint / Pop!_OS** | Mint 21+, Pop 22.04+ | apt |
 | **Fedora / RHEL** | Fedora 39+, RHEL 9+ | dnf |
 | **Arch / Manjaro** | Arch, Manjaro, EndeavourOS | pacman |
 | **openSUSE** | Tumbleweed, Leap 15.5+ | zypper |
+
+The `.desktop` file ships with a bundled SVG icon (referenced by absolute path), so the launcher entry renders correctly on every freedesktop-compliant DE — KDE Plasma, GNOME, Cinnamon (Mint), MATE, XFCE — without depending on the user's icon theme.
 
 The installer auto-detects your distro and uses the right package manager.
 
@@ -168,18 +170,22 @@ The patch is in `patches/cs9711-retry-delay-1500ms.patch`.
 
 ## PAM Configuration
 
-The installer configures PAM for fingerprint auth:
+The installer configures PAM for fingerprint auth, picking the right method per distro family (since v1.8.2):
 
-**Debian/Ubuntu** (`/etc/pam.d/common-auth`):
-```
-auth sufficient pam_fprintd.so max-tries=7 timeout=30
+**Debian / Ubuntu / Mint / Pop!_OS** — edits the canonical `pam-configs` profile and lets `pam-auth-update` wire it into the stack. This is the only method that survives package upgrades and `pam-auth-update` regenerations:
+```bash
+# install.sh sets max-tries=7 / timeout=30 in /usr/share/pam-configs/fprintd, then:
+sudo pam-auth-update --enable fprintd
 ```
 
-**Fedora/RHEL** (via `authselect`):
+**Fedora / RHEL** — via `authselect`:
 ```bash
 sudo authselect enable-feature with-fingerprint
 ```
 
+**Arch / openSUSE / fallback** — direct edit of `/etc/pam.d/system-auth` or `/etc/pam.d/common-auth`.
+
+Defaults wired by all paths:
 - **max-tries=7** — 7 fingerprint attempts before falling back to password (default is 1)
 - **timeout=30** — 30-second window for all attempts (default is 10)
 
