@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CS9711 Fingerprint Manager — application icon.
+     Theme-independent SVG referenced by absolute path in the .desktop file,
+     so it renders consistently on KDE Plasma (Breeze), GNOME (Adwaita),
+     Cinnamon (Mint-Y), MATE, XFCE, and any other freedesktop-compliant DE
+     regardless of which icon set the user has installed. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <g fill="none" stroke="#3584e4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Outer ridge — full forehead arc -->
+    <path d="M 8 34 a 24 24 0 0 1 48 0 v 6 a 4 4 0 0 1 -2 3.5"/>
+    <!-- Middle ridge -->
+    <path d="M 16 34 a 16 16 0 0 1 32 0 v 8"/>
+    <!-- Inner ridge -->
+    <path d="M 24 34 a 8 8 0 0 1 16 0 v 16"/>
+    <!-- Centre whorl -->
+    <path d="M 32 52 v -18"/>
+    <!-- Lower fading ridges (left side) -->
+    <path d="M 8 42 c 0 6 1 12 4 18"/>
+    <path d="M 16 46 c 0 5 2 9 4 13"/>
+    <path d="M 24 48 c 0 3 1 5 2 8"/>
+  </g>
+</svg>

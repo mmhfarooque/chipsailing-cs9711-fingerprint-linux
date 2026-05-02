@@ -2,10 +2,13 @@
 Type=Application
 Name=CS9711 Fingerprint Manager
 Comment=Configure Chipsailing CS9711 fingerprint scanner
-# NOTE: This is a template. Run ./setup-gui.sh to install with the correct path.
-# Exec will be set to your actual clone location by setup-gui.sh
+# NOTE: This is a template. Run ./setup-gui.sh (or ./install.sh) to install with
+# the correct absolute paths — both Exec and Icon are rewritten with $SCRIPT_DIR
+# so the icon renders without depending on the user's icon theme (matters on
+# KDE Breeze / Mint-Y / MATE / XFCE etc., where Adwaita symbolic names like
+# auth-fingerprint-symbolic don't resolve and fall back to the blank glyph).
 Exec=python3 cs9711-manager.py
-Icon=auth-fingerprint-symbolic
+Icon=assets/cs9711-manager.svg
 Terminal=false
 Categories=Settings;HardwareSettings;System;
 Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;

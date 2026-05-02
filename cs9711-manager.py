@@ -63,11 +63,46 @@ def get_app_version():
 
 APP_VERSION = get_app_version()
 
+PAM_DIR = "/etc/pam.d"
+
+# Distro-wide common authentication stack files. Used by get_pam_settings() to
+# locate the file holding the active pam_fprintd.so line, and by the auth-
+# location heuristic to detect services that fall back to PAM defaults.
 PAM_FILES = [
-    "/etc/pam.d/common-auth",
-    "/etc/pam.d/system-auth",
-    "/etc/pam.d/fingerprint-auth",
+    "/etc/pam.d/common-auth",       # Debian, Ubuntu, Mint, Pop!_OS
+    "/etc/pam.d/system-auth",       # Fedora, RHEL, CentOS, Arch, Manjaro
+    "/etc/pam.d/fingerprint-auth",  # Fedora alternative
+    "/etc/pam.d/password-auth",     # Fedora alternative
+    "/etc/pam.d/common-auth-pc",    # openSUSE
 ]
+
+# Bare filenames (relative to /etc/pam.d/) of the same set, for include-resolution.
+DISTRO_COMMON_AUTH_FILES = [os.path.basename(p) for p in PAM_FILES]
+
+# PAM service files to check per auth context, covering the major
+# desktop environments and login managers across popular distros.
+SERVICE_PAM_FILES = {
+    "Login screen": [
+        "sddm",                  # KDE
+        "gdm-password",          # GNOME
+        "gdm-fingerprint",       # GNOME (fingerprint-specific)
+        "lightdm",               # XFCE / Cinnamon / Mint default
+        "lxdm",                  # LXDE
+        "login",                 # TTY login fallback
+    ],
+    "Lock screen": [
+        "kscreenlocker",         # KDE Plasma 6
+        "kscreenlocker_greet",   # KDE Plasma 6 (alt)
+        "kde",                   # KDE generic
+        "gdm-password",          # GNOME (also handles unlock)
+        "cinnamon-screensaver",  # Cinnamon (Mint)
+        "mate-screensaver",      # MATE
+        "xfce4-screensaver",     # XFCE
+        "light-locker",          # LightDM lock helper
+    ],
+    "sudo": ["sudo"],
+    "polkit": ["polkit-1", "polkit-1-kde-1"],
+}
 
 FINGERS = [
     ("right-index-finger", "Right index finger"),
@@ -179,28 +214,74 @@ def get_pam_settings():
     return max_tries, timeout, None
 
 
+def _read_pam_resolved(name, seen=None):
+    """Read a PAM file and recursively resolve all @include / include / substack
+    directives, returning the concatenated effective content (or '' if missing).
+
+    Handles both Debian/Ubuntu syntax (@include common-auth) and Fedora/Arch
+    syntax (auth include system-auth, auth substack password-auth). Cycle-safe
+    via the `seen` set.
+    """
+    if seen is None:
+        seen = set()
+    if name in seen:
+        return ""
+    seen.add(name)
+
+    path = name if name.startswith("/") else os.path.join(PAM_DIR, name)
+    try:
+        with open(path) as f:
+            raw = f.read()
+    except (FileNotFoundError, PermissionError, IsADirectoryError):
+        return ""
+
+    chunks = [raw]
+    for line in raw.splitlines():
+        line = line.split("#", 1)[0].strip()  # strip comments
+        if not line:
+            continue
+        # @include FILE  (Debian/Ubuntu/openSUSE)
+        m = re.match(r"^@include\s+(\S+)$", line)
+        # auth/account/password/session  include|substack  FILE  (Fedora/Arch)
+        if not m:
+            m = re.match(r"^\S+\s+(?:include|substack)\s+(\S+)$", line)
+        if m:
+            chunks.append(_read_pam_resolved(m.group(1), seen))
+    return "\n".join(chunks)
+
+
+def _has_fprintd_in_stack(name):
+    """True iff pam_fprintd.so appears in the effective PAM stack of `name`."""
+    return "pam_fprintd.so" in _read_pam_resolved(name)
+
+
 def get_pam_auth_locations():
-    """Check which PAM services have fingerprint enabled."""
+    """Check which PAM services have fingerprint enabled.
+
+    Walks each candidate service file's @include / include / substack chain so
+    that on Debian/Ubuntu (where /etc/pam.d/sudo etc. just @include common-auth)
+    we correctly report enabled. If a service has *no* PAM file at all (e.g.
+    /etc/pam.d/polkit-1 missing on Kubuntu — polkitd falls back to PAM
+    defaults), report enabled iff the distro common stack carries fprintd.
+    """
+    common_enabled = any(
+        _has_fprintd_in_stack(f) for f in DISTRO_COMMON_AUTH_FILES
+    )
+
     locations = {}
-    services = {
-        "Login screen": ["/etc/pam.d/gdm-password", "/etc/pam.d/gdm-fingerprint",
-                         "/etc/pam.d/sddm", "/etc/pam.d/lightdm"],
-        "Lock screen": ["/etc/pam.d/gdm-password", "/etc/pam.d/gdm-fingerprint",
-                        "/etc/pam.d/kde"],
-        "sudo": ["/etc/pam.d/sudo", "/etc/pam.d/common-auth", "/etc/pam.d/system-auth"],
-        "polkit": ["/etc/pam.d/polkit-1"],
-    }
-    for name, paths in services.items():
+    for name, files in SERVICE_PAM_FILES.items():
         enabled = False
-        for path in paths:
-            try:
-                with open(path) as f:
-                    content = f.read()
-                    if "pam_fprintd.so" in content or "common-auth" in content or "system-auth" in content:
-                        enabled = True
-                        break
-            except FileNotFoundError:
-                continue
+        any_file_present = False
+        for f in files:
+            if os.path.exists(os.path.join(PAM_DIR, f)):
+                any_file_present = True
+                if _has_fprintd_in_stack(f):
+                    enabled = True
+                    break
+        # No service-specific PAM file => service inherits PAM defaults,
+        # which on every major distro route through the common-auth equivalent.
+        if not enabled and not any_file_present and common_enabled:
+            enabled = True
         locations[name] = enabled
     return locations
 

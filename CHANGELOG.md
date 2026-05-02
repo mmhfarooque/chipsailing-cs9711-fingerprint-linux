@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.8.3] - 2026-05-02
+
+### Fixed
+- **App icon was blank on every non-GNOME desktop** — the `.desktop` file referenced `Icon=auth-fingerprint-symbolic`, which only ships in the Adwaita icon set. KDE Plasma (Breeze), Cinnamon (Mint-Y), MATE, XFCE, and any user not on Adwaita got the generic blank-page glyph in their app launcher. v1.4.0's claim "Native fingerprint icon — uses auth-fingerprint-symbolic from Adwaita/Yaru" was GNOME-only. Now ships a bundled `assets/cs9711-manager.svg` and the `.desktop` writes `Icon=$SCRIPT_DIR/assets/cs9711-manager.svg` (absolute path) — theme-independent on every freedesktop-compliant DE.
+- **GUI auth-locations panel falsely reported "Lock screen: Not configured" / "polkit: Not configured" while fingerprint actually worked** — `get_pam_auth_locations()` did substring-only matching ("common-auth" in content) and never followed `@include` / `include` / `substack` directives, so on Debian/Ubuntu/Mint where `/etc/pam.d/sudo` etc. just say `@include common-auth` (with the actual `pam_fprintd.so` line living in `common-auth`), some contexts were missed. On Kubuntu specifically `/etc/pam.d/polkit-1` and `/etc/pam.d/kscreenlocker` aren't even shipped — those services fall back to PAM defaults — and the old code had no concept of that fallback. Now the function recursively resolves `@include` (Debian/Ubuntu/openSUSE), `include`, and `substack` (Fedora/Arch) directives with cycle detection, lists per-DE PAM files for KDE Plasma / GNOME / Cinnamon / MATE / XFCE / LightDM / LXDM, checks all distro common-auth equivalents (`common-auth`, `system-auth`, `password-auth`, `fingerprint-auth`, `common-auth-pc`), and reports services that have no specific PAM file as enabled when the common stack carries fprintd.
+
+### Tested
+- Kubuntu 26.04 LTS / Plasma 6.6.4 — icon renders in app launcher; all four auth contexts (Login, Lock, sudo, polkit) correctly report Enabled.
+
+---
+
 ## [1.8.2] - 2026-04-25
 
 ### Fixed
