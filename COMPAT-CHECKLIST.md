@@ -56,6 +56,7 @@ the community (GitHub `ddlsmurf#7`, Linux Mint forum threads `t=451286` / `t=451
 - [x] Explicit C/C++ compiler in dep lists (`build-essential` apt; `gcc gcc-c++` dnf/zypper; Arch via `base-devel`)
 - [x] Container build-test on **Fedora 44** (OpenCV + GCC15) — PASS
 - [x] Container build-test on **Arch, openSUSE Tumbleweed, Ubuntu 26.04, Debian 13, Mint 22** — all PASS
+- [x] **Bleeding-edge** build-test PASS (2026-05-30): **Fedora Rawhide (F45 prerelease), Debian sid (forky/sid), Ubuntu devel (Resolute Raccoon)** — newest GCC/meson, no breakage. OpenCV 5 still in no distro (Rawhide = opencv 4.13.0), so the `opencv5` fallback remains forward-looking only
 - [x] Confirmed fork meson option names valid on every distro's meson (all configured cleanly)
 - [ ] Decide libfprint-drift policy (pin a known-good fork commit vs detect+warn) — fork still on 1.94.10 while distros ship 1.95.x
 
