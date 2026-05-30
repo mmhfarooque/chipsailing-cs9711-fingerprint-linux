@@ -53,6 +53,12 @@ if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
     fi
     echo "  Made doctest optional"
 fi
+
+# Keep OpenCV version-flexible (opencv4 -> opencv5 fallback) on rebuilds too
+if [ -f "$SIGFM_MESON" ] && grep -q "dependency('opencv4', required: true)" "$SIGFM_MESON"; then
+    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: true)\nendif|" "$SIGFM_MESON"
+    echo "  OpenCV dependency made version-flexible (opencv4 -> opencv5 fallback)"
+fi
 echo ""
 
 # Build

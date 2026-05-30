@@ -87,7 +87,7 @@ detect_distro() {
 install_deps_apt() {
     sudo apt update -qq
     sudo apt install -y \
-        git meson ninja-build \
+        build-essential git meson ninja-build \
         libfprint-2-dev libglib2.0-dev libgusb-dev \
         libpixman-1-dev libcairo2-dev libssl-dev \
         libopencv-dev doctest-dev \
@@ -97,7 +97,7 @@ install_deps_apt() {
 
 install_deps_dnf() {
     sudo dnf install -y \
-        git meson ninja-build \
+        gcc gcc-c++ git meson ninja-build \
         libfprint-devel glib2-devel libgusb-devel \
         pixman-devel cairo-devel openssl-devel \
         opencv-devel doctest \
@@ -108,7 +108,7 @@ install_deps_dnf() {
 install_deps_pacman() {
     sudo pacman -S --needed --noconfirm \
         base-devel git meson ninja \
-        libfprint glib2 libgusb \
+        libfprint glib2 glib2-devel libgusb \
         pixman cairo openssl \
         opencv doctest \
         gobject-introspection \
@@ -117,9 +117,9 @@ install_deps_pacman() {
 
 install_deps_zypper() {
     sudo zypper install -y \
-        git meson ninja \
+        gcc gcc-c++ git meson ninja \
         libfprint-devel glib2-devel libgusb-devel \
-        pixman-devel cairo-devel libopenssl-devel \
+        libpixman-1-0-devel cairo-devel libopenssl-devel \
         opencv-devel doctest-devel \
         gobject-introspection-devel \
         fprintd fprintd-pam 2>&1 | tail -5
@@ -321,6 +321,14 @@ if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
     fi
     ok "Made doctest optional (not needed for driver)"
 fi
+
+# Make OpenCV version-flexible: prefer opencv4, fall back to opencv5.
+# Newer distros (Fedora 44+, and future Ubuntu/openSUSE/Arch) ship OpenCV 5,
+# where the fork's hardcoded opencv4 'required: true' fails the whole build.
+if [ -f "$SIGFM_MESON" ] && grep -q "dependency('opencv4', required: true)" "$SIGFM_MESON"; then
+    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: true)\nendif|" "$SIGFM_MESON"
+    ok "OpenCV dependency made version-flexible (opencv4 -> opencv5 fallback)"
+fi
 echo ""
 
 # ---- Step 4: Build ----
@@ -380,6 +388,82 @@ echo ""
 # ---- Step 7: Configure PAM ----
 echo "[7/8] Configuring PAM for fingerprint auth..."
 configure_pam
+echo ""
+
+# ---- Step 7b: Install update guard (survives system upgrades) ----
+# Fixes the most-reported community complaint: "a system update overwrote
+# libfprint and broke fingerprint." A package-manager hook runs after every
+# transaction; if our patched driver is no longer the active one, it rebuilds.
+echo "[7b/8] Installing update guard (re-applies driver after system updates)..."
+GUARD_BIN="/usr/local/bin/cs9711-update-guard"
+sudo tee "$GUARD_BIN" >/dev/null << 'GUARDEOF'
+#!/bin/bash
+# CS9711 update guard — triggered by package-manager hooks after every
+# transaction. If a system package update shadowed or removed our patched
+# libfprint (detected by the ABSENCE of the cs9711 driver marker in the
+# libfprint that ld.so currently resolves), rebuild + reinstall from local
+# source in the background. Fail-safe: never blocks a package transaction.
+SRC_DIR="__SRC__"
+LOGF="__LOG__"
+glog(){ echo "$(date '+%F %T') [GUARD] $1" >> "$LOGF" 2>/dev/null; }
+[ -d "$SRC_DIR/libfprint-CS9711/builddir" ] || exit 0
+RESOLVED=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
+# If the active libfprint still carries the cs9711 driver, nothing to do.
+if [ -n "$RESOLVED" ] && grep -aq "cs9711" "$RESOLVED" 2>/dev/null; then
+    exit 0
+fi
+glog "active libfprint ($RESOLVED) lacks cs9711 driver — rebuilding from $SRC_DIR"
+nohup bash -c "
+    cd '$SRC_DIR/libfprint-CS9711' || exit 0
+    meson compile -C builddir >/dev/null 2>&1
+    meson install -C builddir >/dev/null 2>&1
+    ldconfig 2>/dev/null
+    systemctl restart fprintd >/dev/null 2>&1
+    echo \"\$(date '+%F %T') [GUARD] rebuild complete\" >> '$LOGF' 2>/dev/null
+" >/dev/null 2>&1 &
+disown 2>/dev/null || true
+exit 0
+GUARDEOF
+sudo sed -i "s|__SRC__|$SCRIPT_DIR|g; s|__LOG__|$LOG_FILE|g" "$GUARD_BIN"
+sudo chmod +x "$GUARD_BIN"
+ok "Update guard installed at $GUARD_BIN"
+
+case "$PKG_FAMILY" in
+    apt)
+        echo 'DPkg::Post-Invoke { "/usr/local/bin/cs9711-update-guard || true"; };' \
+            | sudo tee /etc/apt/apt.conf.d/99-cs9711-guard >/dev/null
+        ok "APT hook installed — driver survives 'apt upgrade'"
+        ;;
+    dnf)
+        if [ -d /etc/dnf/plugins/post-transaction-actions.d ]; then
+            echo 'libfprint*:any:/usr/local/bin/cs9711-update-guard' \
+                | sudo tee /etc/dnf/plugins/post-transaction-actions.d/cs9711.action >/dev/null
+            ok "dnf post-transaction hook installed"
+        else
+            warn "dnf post-transaction-actions plugin not present — guard binary installed,"
+            echo "       auto-trigger needs: sudo dnf install python3-dnf-plugin-post-transaction-actions"
+            echo "       (Fedora 41+/dnf5: see COMPAT-CHECKLIST.md). Manual recovery: ./reinstall.sh"
+        fi
+        ;;
+    pacman)
+        sudo mkdir -p /etc/pacman.d/hooks 2>/dev/null || true
+        sudo tee /etc/pacman.d/hooks/cs9711.hook >/dev/null << 'PHOOK'
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = libfprint
+
+[Action]
+Description = Re-applying CS9711 fingerprint driver patch...
+When = PostTransaction
+Exec = /usr/local/bin/cs9711-update-guard
+PHOOK
+        ok "pacman hook installed"
+        ;;
+    zypper)
+        warn "openSUSE: no auto-hook wired — run ./reinstall.sh after a libfprint update"
+        ;;
+esac
 echo ""
 
 # ---- Step 8: Install GUI Manager ----

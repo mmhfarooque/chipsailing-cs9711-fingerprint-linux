@@ -104,6 +104,13 @@ if [ -f "$DESKTOP_FILE" ]; then
     echo "  GUI desktop shortcut removed"
 fi
 
+# Remove the update guard and any package-manager hooks it installed
+sudo rm -f /usr/local/bin/cs9711-update-guard 2>/dev/null
+sudo rm -f /etc/apt/apt.conf.d/99-cs9711-guard 2>/dev/null
+sudo rm -f /etc/dnf/plugins/post-transaction-actions.d/cs9711.action 2>/dev/null
+sudo rm -f /etc/pacman.d/hooks/cs9711.hook 2>/dev/null
+echo "  Update guard and package-manager hooks removed"
+
 echo "=== Uninstall complete ==="
 echo ""
 echo "Stock libfprint restored. CS9711 will no longer be supported."

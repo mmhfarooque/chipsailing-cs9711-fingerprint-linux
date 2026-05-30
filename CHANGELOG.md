@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.0] - 2026-05-30
+
+### Added
+- **All-latest-distro compatibility, container-validated.** The driver build-tests green on **Ubuntu 26.04 LTS, Fedora 44, Arch Linux, openSUSE Tumbleweed, Debian 13, and Linux Mint 22** via the new `scripts/distro-build-matrix.sh` (podman). Tracked in `COMPAT-CHECKLIST.md`.
+- **Update guard — fixes the #1 community complaint ("a system update broke fingerprint").** `install.sh` deploys `/usr/local/bin/cs9711-update-guard` plus a package-manager post-transaction hook (apt `DPkg::Post-Invoke`, dnf `post-transaction-actions`, pacman `PostTransaction`). After any transaction, if the active `libfprint` no longer carries the `cs9711` driver marker, the guard rebuilds + reinstalls from local source in the background. `uninstall.sh` removes the guard and all hooks.
+
+### Fixed
+- **OpenCV 5 build break.** sigfm hardcoded `dependency('opencv4', required: true)`, which fails on distros that have moved to OpenCV 5. `install.sh` and `reinstall.sh` now patch it to prefer `opencv4` and fall back to `opencv5`.
+- **Missing build dependencies on minimal / fresh installs** (caught by the container matrix):
+  - No explicit C/C++ compiler in the apt/dnf/zypper dep lists — added `build-essential` (apt) and `gcc gcc-c++` (dnf/zypper). Arch's `base-devel` already covered it.
+  - **Arch:** missing `glib2-devel` — Arch split the glib dev tools (incl. `glib-mkenums`) into a separate package, so `meson setup` failed.
+  - **openSUSE:** wrong package name `pixman-devel` → `libpixman-1-0-devel`.
+- **README:** documented the unpowered-USB-hub detection failure (the CS9711 is power-sensitive) and the powered-hub fix.
+
+### Notes
+- Container tests validate the **build** path only (deps + meson + compile + cs9711 driver marker present). PAM / desktop-environment behaviour, fingerprint enrollment, and the update-guard's live trigger still need a real machine per distro — tracked in `COMPAT-CHECKLIST.md`.
+
+---
+
 ## [1.8.3] - 2026-05-02
 
 ### Fixed

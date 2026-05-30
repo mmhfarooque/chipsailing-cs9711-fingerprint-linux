@@ -34,8 +34,15 @@ This USB fingerprint sensor can be connected in two ways:
 | Scanner → Keyboard USB port, keyboard wired to PC | Yes |
 | Scanner → Keyboard USB port, keyboard on Bluetooth | **No** — no data, only power |
 | Scanner → Keyboard USB port, keyboard on 2.4GHz wireless | **No** — no data, only power |
+| Scanner → **unpowered** USB hub | Sometimes **No** — see below |
 
 If `lsusb | grep 2541:0236` shows nothing, check your USB connection first.
+
+> **Power note:** the CS9711 is power-sensitive. On some machines it enumerates
+> fine in a rear/direct port but **fails to be detected behind an unpowered USB
+> hub** — the LED lights (it draws a little power) but the PC never sees the
+> data device. If `lsusb` doesn't list it through a hub, plug it directly into
+> the PC or use a **hub with its own power supply**.
 
 ## Supported Distros
 
