@@ -48,11 +48,13 @@ If `lsusb | grep 2541:0236` shows nothing, check your USB connection first.
 
 | Distro Family | Tested On | Package Manager |
 |---------------|-----------|-----------------|
-| **Ubuntu / Kubuntu / Debian** | Ubuntu 24.04, Ubuntu 26.04, Kubuntu 26.04 LTS (Plasma 6.6.4), Debian 12+ | apt |
-| **Linux Mint / Pop!_OS** | Mint 21+, Pop 22.04+ | apt |
-| **Fedora / RHEL** | Fedora 39+, RHEL 9+ | dnf |
+| **Ubuntu / Kubuntu / Debian** | Ubuntu 24.04, **26.04 LTS**, Kubuntu 26.04 (Plasma 6.6.4, reference HW), Debian 12+ / **13 Trixie** | apt |
+| **Linux Mint / Pop!_OS** | **Mint 22**, Mint 21+, Pop 22.04+ | apt |
+| **Fedora / RHEL** | **Fedora 44** (+ Rawhide/F45), RHEL 9+ | dnf |
 | **Arch / Manjaro** | Arch, Manjaro, EndeavourOS | pacman |
 | **openSUSE** | Tumbleweed, Leap 15.5+ | zypper |
+
+Every distro above is **container build-verified** (v2.0.0, 2026-05-30) — and bleeding-edge branches (Fedora Rawhide/F45, Debian sid, Ubuntu devel) build clean too. See `COMPAT-CHECKLIST.md`.
 
 The `.desktop` file ships with a bundled SVG icon (referenced by absolute path), so the launcher entry renders correctly on every freedesktop-compliant DE — KDE Plasma, GNOME, Cinnamon (Mint), MATE, XFCE — without depending on the user's icon theme.
 
@@ -295,6 +297,8 @@ lsusb | grep 2541                     # Check if scanner is connected
 ## Credits
 
 - **Community driver:** [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) (maintained fork, originally by [ddlsmurf](https://github.com/ddlsmurf))
+
+> **Installer vs driver:** this repo is the *installer / setup* layer. The driver and its fingerprint **matching** (e.g. `verify-no-match`) live upstream in [archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711) — report matching/driver issues there. After installing, **re-enroll** for a clean template: `fprintd-delete $(whoami) && fprintd-enroll`.
 - **Retry delay patch & Linux integration:** [mmhfarooque](https://github.com/mmhfarooque)
 
 ## Changelog

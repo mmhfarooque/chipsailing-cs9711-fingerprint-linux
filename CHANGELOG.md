@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.0.0] - 2026-05-30
+
+**Milestone release.** Consolidates the v1.9.x line into one headline: the CS9711 installer now builds and sets up correctly on **every current mainstream Linux distro**, repairs itself after system updates, and is hardened against the two real-world hazards an end-user review surfaced. No breaking changes — the major bump marks the leap from "tested on one machine" to "verified across the ecosystem."
+
+### All-distro compatibility — container-verified (2026-05-30)
+Build-tested green (deps → meson → compile → `cs9711` driver present in the `.so`) on:
+- **Stable / LTS:** Ubuntu 26.04 LTS, Fedora 44, Arch Linux, openSUSE Tumbleweed, Debian 13 (Trixie), Linux Mint 22.
+- **Bleeding-edge:** Fedora Rawhide (F45 prerelease), Debian sid, Ubuntu devel ("Resolute Raccoon").
+- **Reference platform (real hardware, daily use):** Kubuntu 26.04 / Plasma 6.6.4 — enroll, verify/match, and `sudo`/lock/login all functional.
+
+Real packaging gaps the matrix exposed and fixed (each would have failed a fresh install):
+- No C/C++ compiler in the dep lists → added `build-essential` (apt) and `gcc gcc-c++` (dnf/zypper); Arch's `base-devel` already covered it.
+- **Arch** split the glib dev tools out → added `glib2-devel` (build failed at `meson setup` without it).
+- **openSUSE** package name `pixman-devel` → `libpixman-1-0-devel`.
+- **OpenCV:** sigfm hardcoded `opencv4` (`required: true`) → now prefers `opencv4` and falls back to `opencv5` for future distros (control-flow proven; OpenCV 5 ships nowhere yet — even Rawhide is 4.13.0).
+
+### Self-healing update guard — fixes the #1 community complaint
+*"A system update overwrote libfprint and broke fingerprint."* A package-manager post-transaction hook now detects when the active libfprint loses the `cs9711` driver and **restores it automatically**:
+- Hooks: apt `DPkg::Post-Invoke`, **dnf5 `libdnf5-plugin-actions`** (verified firing on Fedora 44), dnf4 `post-transaction-actions`, pacman `PostTransaction`.
+- Restore is from a **root-owned cache** (`/var/lib/cs9711-fingerprint`) via plain file-copy — fast, can't fail to compile, and never executes build files as root.
+
+### Security & footgun hardening (end-user review pass)
+- **No build-as-root.** Earlier guards ran `meson` as root from the user's home directory — a local privilege-escalation vector. Replaced with the root-owned-cache restore above.
+- **Won't silently break a different reader.** The installer builds a CS9711-only libfprint into `/usr/local` that shadows the system one; on a laptop with a *different* fingerprint reader that would break it. Now **aborts if the CS9711 (`2541:0236`) isn't detected** (override `CS9711_FORCE=1`) + prominent README warning.
+- `uninstall.sh` removes the guard / hooks / cache **first**, so reinstalling stock libfprint can't re-trigger the guard.
+
+### Scope note
+This project is the **installer / setup / packaging layer**. The driver and its fingerprint *matching* (e.g. `verify-no-match`) are upstream **[archeYR/libfprint-CS9711](https://github.com/archeYR/libfprint-CS9711)** — we default users to that best-maintained fork and prompt a clean re-enroll.
+
+*(Rolls up [1.9.0] + [1.9.1] + [1.9.2]; granular history below.)*
+
+---
+
 ## [1.9.2] - 2026-05-30
 
 ### Changed — security & robustness (end-user review pass)
