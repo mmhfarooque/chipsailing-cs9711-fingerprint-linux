@@ -63,7 +63,8 @@ sudo rm -f /etc/apt/apt.conf.d/99-cs9711-guard 2>/dev/null
 sudo rm -f /etc/dnf/plugins/post-transaction-actions.d/cs9711.action 2>/dev/null
 sudo rm -f /etc/dnf/libdnf5-plugins/actions.d/cs9711.actions 2>/dev/null
 sudo rm -f /etc/pacman.d/hooks/cs9711.hook 2>/dev/null
-echo "  Guard and hooks removed"
+sudo rm -rf /var/lib/cs9711-fingerprint 2>/dev/null
+echo "  Guard, hooks, and restore cache removed"
 echo ""
 
 # Remove enrolled fingerprints

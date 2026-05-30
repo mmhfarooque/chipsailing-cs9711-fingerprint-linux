@@ -7,6 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.2] - 2026-05-30
+
+### Changed — security & robustness (end-user review pass)
+- **The update guard no longer compiles as root.** v1.9.0–1.9.1 ran `meson compile && meson install` *as root* from the source tree in the user's home directory — a local privilege-escalation vector (root executing build files from a user-writable path) and a silent-failure risk if the toolchain was missing. The built driver is now snapshotted into a **root-owned cache** (`/var/lib/cs9711-fingerprint`) at install time, and the guard restores it with a **plain file copy** — faster, can't fail to compile, and never executes anything from a user-writable directory. Verified end-to-end in a container (install → cache → simulated update wipe → guard restore).
+
+### Fixed — footgun for users with a *different* fingerprint reader
+- **install.sh refuses to silently shadow another reader's driver.** The installer builds a CS9711-only `libfprint` into `/usr/local` that takes precedence over the system one, so running it on a typical laptop (Goodix/Synaptics/ELAN reader) would break that reader. It now **aborts when the CS9711 (`2541:0236`) isn't detected** rather than building blindly — the old non-interactive/GUI path auto-continued. Override with `CS9711_FORCE=1`. README carries a prominent warning.
+
+---
+
 ## [1.9.1] - 2026-05-30
 
 ### Fixed

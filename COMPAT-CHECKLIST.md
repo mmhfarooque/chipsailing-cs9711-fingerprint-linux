@@ -67,7 +67,7 @@ the community (GitHub `ddlsmurf#7`, Linux Mint forum threads `t=451286` / `t=451
 - [ ] GUI runtime deps (gtk4 / libadwaita / typelibs) still only checked on Kubuntu — verify per distro at runtime (step 8 of install.sh)
 
 ### C. Update-survival (closes complaint #1)
-- [x] `cs9711-update-guard` helper (background rebuild when `cs9711` marker missing from active lib)
+- [x] `cs9711-update-guard` helper — restores the driver from a **root-owned cache** (`/var/lib/cs9711-fingerprint`) when the `cs9711` marker is missing from the active lib. Plain file copy, **no build-as-root** (v1.9.2 hardening — closed a local-privesc vector). Container-verified end-to-end.
 - [x] APT hook (`/etc/apt/apt.conf.d/99-cs9711-guard`)
 - [x] pacman hook (`/etc/pacman.d/hooks/cs9711.hook`)
 - [x] dnf4 post-transaction-action (`/etc/dnf/plugins/post-transaction-actions.d/cs9711.action`)
@@ -75,6 +75,13 @@ the community (GitHub `ddlsmurf#7`, Linux Mint forum threads `t=451286` / `t=451
 - [x] uninstall removes guard + all hooks **before** the stock-libfprint reinstall (fixed v1.9.1 — was re-triggering the guard)
 - [ ] Real test: `apt/dnf/pacman upgrade` that bumps libfprint on a live machine → guard auto-recovers (container fired the hook; full rebuild path still real-machine-only)
 - [ ] Assumption to revisit: OpenCV 5's pkg-config name is `opencv5` (matches the `opencv4` convention) — confirm when a distro actually ships OpenCV 5
+
+### G. End-user-perspective review (v1.9.2)
+- [x] **Shadow-a-different-reader footgun** — installs a CS9711-only libfprint to `/usr/local`; aborts now if `2541:0236` not detected (`CS9711_FORCE=1` to override) + README warning.
+- [x] **Guard ran build-as-root from user home** (local privesc) — replaced with root-owned-cache restore (plain copy).
+- [ ] **`install.sh` force-closes the user's terminal** (`kill -9 $PPID` at the end). Aggressive UX from a user's view — consider replacing with a printed "you can close this terminal" message. (Flagged, not changed — deliberate GUI-autolaunch design; Mahmud's call.)
+- [ ] Guard restore can't help if a libfprint **SONAME bump** makes the cached 1.94.10 `.so` ABI-incompatible with a newer fprintd — same limitation as the fork-drift item; tracked under A.
+- [ ] Immutable/atomic distros (Silverblue, Bazzite, SteamOS) — `/usr/local` writability + `ldconfig` behaviour unverified.
 
 ### D. PAM / desktop-environment auth
 - [ ] Fedora 44 GNOME: confirm `authselect with-fingerprint` lights up the polkit password dialog (else add reversible polkit-1 stanza)

@@ -60,6 +60,14 @@ The installer auto-detects your distro and uses the right package manager.
 
 ## Quick Start (All Distros)
 
+> ⚠️ **Only run this if you have the Chipsailing CS9711 (`lsusb` shows `2541:0236`).**
+> The installer builds a **CS9711-only** `libfprint` into `/usr/local`, which takes
+> precedence over your system `libfprint`. If your machine has a **different**
+> fingerprint reader (most laptops — Goodix, Synaptics, ELAN, etc.), running this
+> will **shadow the driver that reader needs and stop it working**. The installer
+> refuses to proceed if the CS9711 isn't detected (override with `CS9711_FORCE=1`).
+> `./uninstall.sh` fully restores your stock `libfprint`.
+
 ```bash
 git clone https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux.git
 cd chipsailing-cs9711-fingerprint-linux

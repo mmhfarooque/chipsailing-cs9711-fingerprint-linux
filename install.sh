@@ -247,13 +247,22 @@ else
     warn "CS9711 scanner NOT detected on USB"
     echo "       Make sure it's plugged in. If using a keyboard passthrough,"
     echo "       the keyboard must be connected via USB cable (not wireless)."
-    if [ -t 0 ]; then
+    echo "       IMPORTANT: this installs a CS9711-only libfprint into /usr/local"
+    echo "       that SHADOWS your system libfprint. If this machine has a"
+    echo "       DIFFERENT built-in fingerprint reader, THAT reader will stop"
+    echo "       working. Only continue if you actually have the CS9711 (2541:0236)."
+    if [ "${CS9711_FORCE:-0}" = "1" ]; then
+        warn "CS9711_FORCE=1 set — continuing without a detected scanner"
+    elif [ -t 0 ]; then
         read -p "  Continue anyway? [y/N] " -n 1 -r
         echo
         [[ $REPLY =~ ^[Yy]$ ]] || exit 1
     else
-        # Non-interactive (e.g. launched from GUI) — continue automatically
-        info "Non-interactive mode — continuing without scanner"
+        # Non-interactive (e.g. launched from the GUI) — DON'T blindly build a
+        # driver that shadows the system one. Require the device or an override.
+        fail "Scanner not detected and not running interactively — aborting."
+        echo "       Plug in the CS9711, or re-run with CS9711_FORCE=1 to override."
+        exit 1
     fi
 fi
 echo ""
@@ -351,6 +360,25 @@ echo "[5/8] Installing driver..."
 sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
 ok "Library installed"
+
+# Snapshot the installed driver into a ROOT-OWNED cache. The update-guard
+# restores from here after a system upgrade with a plain file copy — so it
+# never executes build files from a user-writable directory as root, and can't
+# fail to compile. We record the exact install dir for the guard to restore to.
+CACHE_DIR="/var/lib/cs9711-fingerprint"
+INSTALLED_SO=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
+if [ -n "$INSTALLED_SO" ] && [ -e "$INSTALLED_SO" ]; then
+    INSTALLED_DIR=$(dirname "$INSTALLED_SO")
+    sudo mkdir -p "$CACHE_DIR"
+    sudo cp -a "$INSTALLED_DIR"/libfprint-2.so* "$CACHE_DIR"/ 2>/dev/null || true
+    echo "$INSTALLED_DIR" | sudo tee "$CACHE_DIR/install-dir" >/dev/null
+    TYPELIB=$(find /usr/local -name 'FPrint-2.0.typelib' 2>/dev/null | head -1)
+    if [ -n "$TYPELIB" ]; then
+        sudo cp -a "$TYPELIB" "$CACHE_DIR"/ 2>/dev/null || true
+        dirname "$TYPELIB" | sudo tee "$CACHE_DIR/typelib-dir" >/dev/null
+    fi
+    ok "Driver cached for safe restore ($CACHE_DIR)"
+fi
 echo ""
 
 # ---- Step 6: Restart fprintd and verify ----
@@ -398,33 +426,35 @@ echo "[7b/8] Installing update guard (re-applies driver after system updates)...
 GUARD_BIN="/usr/local/bin/cs9711-update-guard"
 sudo tee "$GUARD_BIN" >/dev/null << 'GUARDEOF'
 #!/bin/bash
-# CS9711 update guard — triggered by package-manager hooks after every
-# transaction. If a system package update shadowed or removed our patched
-# libfprint (detected by the ABSENCE of the cs9711 driver marker in the
-# libfprint that ld.so currently resolves), rebuild + reinstall from local
-# source in the background. Fail-safe: never blocks a package transaction.
-SRC_DIR="__SRC__"
+# CS9711 update guard — run by package-manager hooks after every transaction.
+# If a system update shadowed/removed our patched libfprint (detected by the
+# ABSENCE of the cs9711 driver marker in the libfprint ld.so now resolves),
+# restore it from the ROOT-OWNED cache via a plain file copy — never compiles,
+# never runs anything from a user-writable directory. Fail-safe: never blocks
+# the package transaction.
+CACHE_DIR="/var/lib/cs9711-fingerprint"
 LOGF="__LOG__"
 glog(){ echo "$(date '+%F %T') [GUARD] $1" >> "$LOGF" 2>/dev/null; }
-[ -d "$SRC_DIR/libfprint-CS9711/builddir" ] || exit 0
+[ -f "$CACHE_DIR/install-dir" ] || exit 0
 RESOLVED=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
 # If the active libfprint still carries the cs9711 driver, nothing to do.
 if [ -n "$RESOLVED" ] && grep -aq "cs9711" "$RESOLVED" 2>/dev/null; then
     exit 0
 fi
-glog "active libfprint ($RESOLVED) lacks cs9711 driver — rebuilding from $SRC_DIR"
-nohup bash -c "
-    cd '$SRC_DIR/libfprint-CS9711' || exit 0
-    meson compile -C builddir >/dev/null 2>&1
-    meson install -C builddir >/dev/null 2>&1
-    ldconfig 2>/dev/null
-    systemctl restart fprintd >/dev/null 2>&1
-    echo \"\$(date '+%F %T') [GUARD] rebuild complete\" >> '$LOGF' 2>/dev/null
-" >/dev/null 2>&1 &
-disown 2>/dev/null || true
+DIR=$(cat "$CACHE_DIR/install-dir")
+glog "active libfprint ($RESOLVED) lacks cs9711 driver — restoring from cache to $DIR"
+mkdir -p "$DIR" 2>/dev/null
+cp -a "$CACHE_DIR"/libfprint-2.so* "$DIR"/ 2>/dev/null
+if [ -f "$CACHE_DIR/FPrint-2.0.typelib" ] && [ -s "$CACHE_DIR/typelib-dir" ]; then
+    TDIR=$(cat "$CACHE_DIR/typelib-dir"); mkdir -p "$TDIR" 2>/dev/null
+    cp -a "$CACHE_DIR/FPrint-2.0.typelib" "$TDIR"/ 2>/dev/null
+fi
+ldconfig 2>/dev/null
+systemctl restart fprintd >/dev/null 2>&1
+glog "restore complete"
 exit 0
 GUARDEOF
-sudo sed -i "s|__SRC__|$SCRIPT_DIR|g; s|__LOG__|$LOG_FILE|g" "$GUARD_BIN"
+sudo sed -i "s|__LOG__|$LOG_FILE|g" "$GUARD_BIN"
 sudo chmod +x "$GUARD_BIN"
 ok "Update guard installed at $GUARD_BIN"
 

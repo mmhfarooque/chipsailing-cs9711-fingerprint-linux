@@ -79,6 +79,22 @@ echo ""
 echo "[3/4] Installing..."
 sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
+
+# Refresh the root-owned restore cache used by the update guard
+CACHE_DIR="/var/lib/cs9711-fingerprint"
+INSTALLED_SO=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
+if [ -n "$INSTALLED_SO" ] && [ -e "$INSTALLED_SO" ]; then
+    INSTALLED_DIR=$(dirname "$INSTALLED_SO")
+    sudo mkdir -p "$CACHE_DIR"
+    sudo cp -a "$INSTALLED_DIR"/libfprint-2.so* "$CACHE_DIR"/ 2>/dev/null || true
+    echo "$INSTALLED_DIR" | sudo tee "$CACHE_DIR/install-dir" >/dev/null
+    TYPELIB=$(find /usr/local -name 'FPrint-2.0.typelib' 2>/dev/null | head -1)
+    if [ -n "$TYPELIB" ]; then
+        sudo cp -a "$TYPELIB" "$CACHE_DIR"/ 2>/dev/null || true
+        dirname "$TYPELIB" | sudo tee "$CACHE_DIR/typelib-dir" >/dev/null
+    fi
+    echo "  Restore cache refreshed"
+fi
 echo ""
 
 # Restart and verify
