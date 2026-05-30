@@ -54,6 +54,18 @@ if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
     REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
 fi
 
+# Remove the update guard + package-manager hooks FIRST — before any package
+# operation below. Otherwise reinstalling stock libfprint in step 3 triggers the
+# hook and the guard rebuilds the patched driver right back, defeating uninstall.
+echo "[0/4] Removing update guard and package-manager hooks..."
+sudo rm -f /usr/local/bin/cs9711-update-guard 2>/dev/null
+sudo rm -f /etc/apt/apt.conf.d/99-cs9711-guard 2>/dev/null
+sudo rm -f /etc/dnf/plugins/post-transaction-actions.d/cs9711.action 2>/dev/null
+sudo rm -f /etc/dnf/libdnf5-plugins/actions.d/cs9711.actions 2>/dev/null
+sudo rm -f /etc/pacman.d/hooks/cs9711.hook 2>/dev/null
+echo "  Guard and hooks removed"
+echo ""
+
 # Remove enrolled fingerprints
 echo "[1/4] Removing enrolled fingerprints..."
 fprintd-delete "$REAL_USER" 2>/dev/null && echo "  Fingerprints deleted" || echo "  No fingerprints to delete"
@@ -109,8 +121,6 @@ sudo rm -f /usr/local/bin/cs9711-update-guard 2>/dev/null
 sudo rm -f /etc/apt/apt.conf.d/99-cs9711-guard 2>/dev/null
 sudo rm -f /etc/dnf/plugins/post-transaction-actions.d/cs9711.action 2>/dev/null
 sudo rm -f /etc/pacman.d/hooks/cs9711.hook 2>/dev/null
-echo "  Update guard and package-manager hooks removed"
-
 echo "=== Uninstall complete ==="
 echo ""
 echo "Stock libfprint restored. CS9711 will no longer be supported."

@@ -71,9 +71,10 @@ the community (GitHub `ddlsmurf#7`, Linux Mint forum threads `t=451286` / `t=451
 - [x] APT hook (`/etc/apt/apt.conf.d/99-cs9711-guard`)
 - [x] pacman hook (`/etc/pacman.d/hooks/cs9711.hook`)
 - [x] dnf4 post-transaction-action (`/etc/dnf/plugins/post-transaction-actions.d/cs9711.action`)
-- [ ] **dnf5 (Fedora 41+) actions-plugin format** — current dnf4 file may not fire on F44; verify and add libdnf5 variant
-- [ ] Real test: `apt/dnf/pacman upgrade` that bumps libfprint → guard auto-recovers
-- [x] uninstall.sh removes guard + all hooks
+- [x] **dnf5 (Fedora 41+) actions plugin** — `install.sh` installs `libdnf5-plugin-actions` and writes `actions.d/cs9711.actions`; **verified firing** on a libfprint transaction in a Fedora 44 container (v1.9.1)
+- [x] uninstall removes guard + all hooks **before** the stock-libfprint reinstall (fixed v1.9.1 — was re-triggering the guard)
+- [ ] Real test: `apt/dnf/pacman upgrade` that bumps libfprint on a live machine → guard auto-recovers (container fired the hook; full rebuild path still real-machine-only)
+- [ ] Assumption to revisit: OpenCV 5's pkg-config name is `opencv5` (matches the `opencv4` convention) — confirm when a distro actually ships OpenCV 5
 
 ### D. PAM / desktop-environment auth
 - [ ] Fedora 44 GNOME: confirm `authselect with-fingerprint` lights up the polkit password dialog (else add reversible polkit-1 stanza)

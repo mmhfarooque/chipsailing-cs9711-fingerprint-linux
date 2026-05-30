@@ -435,14 +435,24 @@ case "$PKG_FAMILY" in
         ok "APT hook installed — driver survives 'apt upgrade'"
         ;;
     dnf)
-        if [ -d /etc/dnf/plugins/post-transaction-actions.d ]; then
+        if command -v dnf5 >/dev/null 2>&1 || [ -d /etc/dnf/libdnf5-plugins ]; then
+            # Fedora 41+ / dnf5: libdnf5 actions plugin.
+            # Format: callback_name:package_filter:direction:options:command (5 fields)
+            sudo dnf install -y libdnf5-plugin-actions >/dev/null 2>&1 || true
+            sudo mkdir -p /etc/dnf/libdnf5-plugins/actions.d
+            echo 'post_transaction:libfprint*:::/usr/local/bin/cs9711-update-guard' \
+                | sudo tee /etc/dnf/libdnf5-plugins/actions.d/cs9711.actions >/dev/null
+            ok "dnf5 actions hook installed (libdnf5-plugin-actions)"
+        elif [ -d /etc/dnf/plugins/post-transaction-actions.d ] \
+                || sudo dnf install -y python3-dnf-plugin-post-transaction-actions >/dev/null 2>&1; then
+            # dnf4: post-transaction-actions plugin. Format: pkg_filter:state:command
+            sudo mkdir -p /etc/dnf/plugins/post-transaction-actions.d
             echo 'libfprint*:any:/usr/local/bin/cs9711-update-guard' \
                 | sudo tee /etc/dnf/plugins/post-transaction-actions.d/cs9711.action >/dev/null
             ok "dnf post-transaction hook installed"
         else
-            warn "dnf post-transaction-actions plugin not present — guard binary installed,"
-            echo "       auto-trigger needs: sudo dnf install python3-dnf-plugin-post-transaction-actions"
-            echo "       (Fedora 41+/dnf5: see COMPAT-CHECKLIST.md). Manual recovery: ./reinstall.sh"
+            warn "dnf: couldn't wire an auto-hook — guard binary is installed;"
+            echo "       run ./reinstall.sh after a libfprint update. See COMPAT-CHECKLIST.md"
         fi
         ;;
     pacman)

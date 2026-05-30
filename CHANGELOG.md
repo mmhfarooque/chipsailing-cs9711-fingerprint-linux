@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.9.1] - 2026-05-30
+
+### Fixed
+- **`uninstall.sh` could un-uninstall itself.** Step 3 reinstalls stock libfprint via the package manager, which fired the new update-guard hook — the guard then saw stock libfprint (no `cs9711`) and rebuilt the patched driver right back. The guard + all package-manager hooks are now removed **first** (new step `[0/4]`), before any package operation.
+- **Fedora / dnf5 auto-guard now actually wires up.** v1.9.0 only handled the dnf4 `post-transaction-actions` plugin (absent on Fedora 41+/dnf5), so the #1 complaint — which originated from Fedora users — wasn't auto-fixed there. `install.sh` now detects dnf5, installs `libdnf5-plugin-actions`, and writes `/etc/dnf/libdnf5-plugins/actions.d/cs9711.actions` (`post_transaction:libfprint*:::…`) — verified to fire on a libfprint transaction in a Fedora 44 container. dnf4 path retained as fallback.
+
+### Verified (sanity-check pass)
+- Full build matrix re-run **against the released code** — green on Ubuntu 26.04 LTS, Fedora 44, Arch, openSUSE Tumbleweed, Debian 13, Linux Mint 22.
+- OpenCV `opencv4`→`opencv5` fallback control flow proven (meson falls through when the first dependency is absent).
+- Update-guard detection proven (patched lib with `cs9711` marker → no-op; stock lib → rebuild).
+
+---
+
 ## [1.9.0] - 2026-05-30
 
 ### Added
