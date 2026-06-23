@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.0.1] - 2026-06-23
+
+**Packaging fix — RPM now builds and is hardware-verified on openSUSE.**
+
+### Fixed
+- **RPM spec version drift.** `cs9711-fingerprint.spec` was pinned at `1.2.0` while `VERSION` had moved to `2.0.0`, so `build-rpm.sh` produced a `…-2.0.0.tar.gz` tarball that `%setup` (expecting `…-1.2.0`) could not unpack — the RPM build was broken. Spec version now tracks `VERSION`.
+- **openSUSE BuildRequires.** The spec used Fedora-only package names (`ninja-build`, `pixman-devel`, `openssl-devel`). Added an `%if 0%{?suse_version}` branch with the correct openSUSE names (`ninja`, `libpixman-1-0-devel`, `libopenssl-devel`) and added `gcc-c++` (required by the sigfm/OpenCV C++ build).
+- **Unpackaged-files build abort.** `meson install` lays down the full libfprint tree (headers, pkgconfig, gir). Since the package only ships the runtime `libfprint-2.so*` that shadows the system library, the build no longer aborts over the unpackaged dev files.
+
+### Verified
+- Built and installed as an RPM on **openSUSE Tumbleweed** on real CS9711 hardware (`2541:0236`); enrol + verify confirmed.
+
+---
+
 ## [2.0.0] - 2026-05-30
 
 **Milestone release.** Consolidates the v1.9.x line into one headline: the CS9711 installer now builds and sets up correctly on **every current mainstream Linux distro**, repairs itself after system updates, and is hardened against the two real-world hazards an end-user review surfaced. No breaking changes — the major bump marks the leap from "tested on one machine" to "verified across the ecosystem."

@@ -1,15 +1,25 @@
 Name:           cs9711-fingerprint
-Version:        1.2.0
+Version:        2.0.1
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
 URL:            https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  git meson ninja-build gcc
+# meson installs the full libfprint tree (headers, pkgconfig, gir); we only
+# ship the runtime .so that shadows the system libfprint, so do not abort the
+# build over the rest of the installed-but-unpackaged files.
+%define _unpackaged_files_terminate_build 0
+
+BuildRequires:  git gcc gcc-c++ meson
 BuildRequires:  libfprint-devel glib2-devel libgusb-devel
-BuildRequires:  pixman-devel cairo-devel openssl-devel
-BuildRequires:  opencv-devel gobject-introspection-devel
+BuildRequires:  cairo-devel opencv-devel gobject-introspection-devel
+# Package names diverge between the RPM families:
+%if 0%{?suse_version}
+BuildRequires:  ninja libpixman-1-0-devel libopenssl-devel
+%else
+BuildRequires:  ninja-build pixman-devel openssl-devel
+%endif
 
 Requires:       fprintd fprintd-pam
 
@@ -75,7 +85,18 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
-* Sat Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.2.0-1
+* Tue Jun 23 2026 Mahmud Farooque <farooque7@gmail.com> - 2.0.1-1
+- Sync spec Version with VERSION file (was stuck at 1.2.0, broke rpmbuild %%setup)
+- Cross-distro BuildRequires: correct openSUSE names via %%if suse_version
+  (ninja, libpixman-1-0-devel, libopenssl-devel); add gcc-c++ for sigfm/OpenCV
+- Package only the runtime libfprint-2.so* (ignore meson's dev files)
+- Rebuilt and hardware-verified on openSUSE Tumbleweed (CS9711 enrol + verify)
+
+* Sat May 30 2026 Mahmud Farooque <farooque7@gmail.com> - 2.0.0-1
+- Milestone: all-distro support (apt/dnf/pacman/zypper), container build-verified
+- Self-healing update guard; hardened against real-world install hazards
+
+* Sun Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.2.0-1
 - Add GTK4 GUI manager for scanner settings
 - Fix enrollment progress showing fprintd debug noise
 - Add retry feedback during enrollment (bad read, too short, not centered)
@@ -83,7 +104,7 @@ systemctl restart fprintd 2>/dev/null || true
 - GLib callback pattern compliance
 - Add CHANGELOG.md and VERSION tracking
 
-* Sat Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.0.0-1
+* Sun Apr 12 2026 Mahmud Farooque <farooque7@gmail.com> - 1.0.0-1
 - Initial package: CS9711 driver with 1500ms retry delay patch
 - Multi-distro installer (apt/dnf/pacman/zypper)
 - .deb, RPM, and Arch packaging
