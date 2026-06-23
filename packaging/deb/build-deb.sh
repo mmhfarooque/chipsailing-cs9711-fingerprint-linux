@@ -132,13 +132,29 @@ if systemctl is-active --quiet fprintd 2>/dev/null; then
     systemctl restart fprintd
 fi
 
-# Configure PAM if not already done
-PAM_FILE="/etc/pam.d/common-auth"
-if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE"; then
-    if ! grep -q "max-tries=7" "$PAM_FILE"; then
-        sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
-    fi
-fi
+# Configure PAM per-service (login, lock screen, sudo, polkit) — independent
+# toggles. Each service's own file gets fprintd as 'sufficient'; the full vendor
+# stack incl. the password path is preserved, so password auth can't be locked out.
+set +e
+ETC=/etc/pam.d; VENDOR=/usr/lib/pam.d; MARK="# cs9711-managed"
+INS="auth\tsufficient\tpam_fprintd.so\tmax-tries=7 timeout=30\t$MARK"
+has_vendor_fp(){ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\.so' "$VENDOR/$1"; }
+ensure_copy(){ [ -f "$ETC/$1" ] || { [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }; }
+add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" && return 0
+  awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {print ins; d=1} {print} END{if(!d)exit 3}' "$ETC/$1" > "$ETC/$1.tmp" \
+    || awk -v ins="$INS" 'NR==1{print; print ins; next}{print}' "$ETC/$1" > "$ETC/$1.tmp"
+  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }
+enable_loc(){ local native='' s; for s in "$@"; do has_vendor_fp "$s" && native=x; done
+  [ -n "$native" ] && return 0
+  for s in "$@"; do [ -f "$ETC/$s" ] || [ -f "$VENDOR/$s" ] || continue; add_fp "$s"; done; }
+enable_loc sddm gdm-fingerprint gdm-password lightdm lxdm
+enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-password cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+enable_loc sudo sudo-i
+enable_loc polkit-1 polkit-1-kde-1
+for cf in common-auth common-auth-pc; do
+  [ -f "$ETC/$cf" ] && grep -q pam_fprintd "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
+done
+set -e
 
 echo ""
 echo "============================================"
