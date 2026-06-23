@@ -64,6 +64,26 @@ def get_app_version():
 APP_VERSION = get_app_version()
 
 PAM_DIR = "/etc/pam.d"
+# Vendor PAM dir: on modern openSUSE/Fedora, service files (sddm, sudo, polkit-1,
+# kde-fingerprint, ...) ship here and /etc/pam.d holds only admin overrides.
+# PAM searches /etc/pam.d first, then this. We mirror that so detection and the
+# per-service toggles see the real files, not just the (often empty) /etc copies.
+VENDOR_PAM_DIR = "/usr/lib/pam.d"
+
+# Marker stamped into any /etc/pam.d override the GUI creates, so we can safely
+# identify and revert our own files without clobbering admin-authored ones.
+PAM_MARK = "# cs9711-managed"
+
+
+def _pam_path(name):
+    """Resolve a PAM service name to its active file: /etc/pam.d wins, else vendor."""
+    if name.startswith("/"):
+        return name
+    etc = os.path.join(PAM_DIR, name)
+    if os.path.exists(etc):
+        return etc
+    vendor = os.path.join(VENDOR_PAM_DIR, name)
+    return vendor if os.path.exists(vendor) else etc
 
 # Distro-wide common authentication stack files. Used by get_pam_settings() to
 # locate the file holding the active pam_fprintd.so line, and by the auth-
@@ -91,6 +111,7 @@ SERVICE_PAM_FILES = {
         "login",                 # TTY login fallback
     ],
     "Lock screen": [
+        "kde-fingerprint",       # KDE Plasma 6 — dedicated fingerprint stack (native)
         "kscreenlocker",         # KDE Plasma 6
         "kscreenlocker_greet",   # KDE Plasma 6 (alt)
         "kde",                   # KDE generic
@@ -193,11 +214,29 @@ def get_retry_delay():
     return 1500
 
 
+def _managed_pam_files():
+    """Per-service override files we created (tagged with PAM_MARK)."""
+    out = []
+    try:
+        for fn in os.listdir(PAM_DIR):
+            p = os.path.join(PAM_DIR, fn)
+            try:
+                with open(p) as f:
+                    if PAM_MARK in f.read():
+                        out.append(p)
+            except (OSError, UnicodeDecodeError):
+                continue
+    except OSError:
+        pass
+    return out
+
+
 def get_pam_settings():
-    """Read max-tries and timeout from PAM config."""
-    max_tries = 1
-    timeout = 10
-    for pam_file in PAM_FILES:
+    """Read max-tries/timeout from the fprintd line. Prefer our per-service
+    overrides; fall back to the distro common-auth files."""
+    max_tries = 7
+    timeout = 30
+    for pam_file in _managed_pam_files() + PAM_FILES:
         try:
             with open(pam_file) as f:
                 for line in f:
@@ -209,7 +248,7 @@ def get_pam_settings():
                         if m:
                             timeout = int(m.group(1))
                         return max_tries, timeout, pam_file
-        except FileNotFoundError:
+        except (FileNotFoundError, UnicodeDecodeError):
             continue
     return max_tries, timeout, None
 
@@ -228,7 +267,7 @@ def _read_pam_resolved(name, seen=None):
         return ""
     seen.add(name)
 
-    path = name if name.startswith("/") else os.path.join(PAM_DIR, name)
+    path = _pam_path(name)
     try:
         with open(path) as f:
             raw = f.read()
@@ -273,7 +312,7 @@ def get_pam_auth_locations():
         enabled = False
         any_file_present = False
         for f in files:
-            if os.path.exists(os.path.join(PAM_DIR, f)):
+            if os.path.exists(_pam_path(f)):
                 any_file_present = True
                 if _has_fprintd_in_stack(f):
                     enabled = True
@@ -289,6 +328,64 @@ def get_pam_auth_locations():
 def run_as_root(cmd_str):
     """Run a shell command as root via pkexec."""
     return run_cmd(["pkexec", "bash", "-c", cmd_str], timeout=60)
+
+
+def pam_toggle_cmd(location, enable, max_tries=7, timeout=30):
+    """Build a root bash script that enables/disables fingerprint for one auth
+    location by managing that service's own PAM file — independently of the others.
+
+    Reversible and cross-distro:
+      * Services whose file lives in the vendor dir (openSUSE/Fedora) get an
+        /etc/pam.d override created (and removed again on revert).
+      * Services whose file already lives in /etc (Debian/Ubuntu) are edited in
+        place; on disable our marked line is stripped (file kept).
+      * Services whose vendor file already carries fprintd (KDE's kde-fingerprint)
+        are toggled by removing the line via a shadow override instead of adding.
+    The full vendor stack (incl. the password path) is always preserved, and the
+    fprintd line is only ever 'sufficient', so password auth never breaks.
+    """
+    services = SERVICE_PAM_FILES.get(location, [])
+    svc_list = " ".join(s for s in services if re.match(r"^[A-Za-z0-9._-]+$", s))
+    fp_opts = f"max-tries={int(max_tries)} timeout={int(timeout)}"
+    en = "1" if enable else "0"
+    # INS keeps literal \t; awk -v converts them to tabs when writing the line.
+    ins = f"auth\\tsufficient\\tpam_fprintd.so\\t{fp_opts}\\t{PAM_MARK}"
+    return f'''set -u
+ETC={PAM_DIR}; VENDOR={VENDOR_PAM_DIR}; MARK="{PAM_MARK}"; ENABLE={en}
+INS="{ins}"
+has_vendor_fp(){{ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\\.so' "$VENDOR/$1"; }}
+ensure_copy(){{ [ -f "$ETC/$1" ] || {{ [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }}; }}
+strip_ours(){{ [ -f "$ETC/$1" ] && {{ grep -v "$MARK" "$ETC/$1" > "$ETC/$1.tmp" && mv "$ETC/$1.tmp" "$ETC/$1"; }}; true; }}
+add_fp(){{ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; strip_ours "$1"
+  awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {{print ins; d=1}} {{print}} END{{if(!d)exit 3}}' "$ETC/$1" > "$ETC/$1.tmp" \\
+    || awk -v ins="$INS" 'NR==1{{print; print ins; next}} {{print}}' "$ETC/$1" > "$ETC/$1.tmp"
+  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }}
+revert_vendor(){{ [ -f "$ETC/$1" ] && grep -q "$MARK" "$ETC/$1" && rm -f "$ETC/$1"; true; }}
+remove_fp(){{ [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" || return 0; strip_ours "$1"
+  [ -f "$VENDOR/$1" ] && cmp -s "$ETC/$1" "$VENDOR/$1" && rm -f "$ETC/$1"; true; }}
+shadow_nofp(){{ [ -f "$VENDOR/$1" ] || return 0
+  {{ grep -vE '^[^#]*pam_fprintd\\.so' "$VENDOR/$1"; echo "$MARK"; }} > "$ETC/$1.tmp"
+  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }}
+# Self-heal: per-service files are the source of truth, so any leftover *global*
+# fprintd in common-auth (from an older global setup) must go, or "off" wouldn't
+# actually disable. Safe: only the fprintd line is removed; pam_unix (password) stays.
+for cf in common-auth common-auth-pc; do
+  [ -f "$ETC/$cf" ] && grep -q "pam_fprintd" "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
+done
+# Prefer a "native" fingerprint service (vendor file already ships fprintd, e.g.
+# kde-fingerprint / gdm-fingerprint). If one exists, that alone controls this
+# location; otherwise we manage every existing generic service file.
+NATIVE=""
+for svc in {svc_list}; do has_vendor_fp "$svc" && NATIVE="$NATIVE $svc"; done
+if [ -n "$NATIVE" ]; then TARGETS="$NATIVE"; else TARGETS="{svc_list}"; fi
+for svc in $TARGETS; do
+  [ -f "$ETC/$svc" ] || [ -f "$VENDOR/$svc" ] || continue
+  if [ "$ENABLE" = 1 ]; then
+    if has_vendor_fp "$svc"; then revert_vendor "$svc"; else add_fp "$svc"; fi
+  else
+    if has_vendor_fp "$svc"; then shadow_nofp "$svc"; else remove_fp "$svc"; fi
+  fi
+done'''
 
 
 # ============================================================================
@@ -906,14 +1003,19 @@ class CS9711Window(Adw.ApplicationWindow):
         btn.set_label("Applying...")
 
         def do_apply():
-            _, _, pam_file = get_pam_settings()
-            if not pam_file:
-                pam_file = "/etc/pam.d/common-auth"
-
-            cmd = (
-                f"sed -i 's/pam_fprintd.so.*/pam_fprintd.so "
-                f"max-tries={max_tries} timeout={timeout}/' '{pam_file}'"
-            )
+            # Per-service model: update max-tries/timeout on every override we manage
+            # (tagged with PAM_MARK), and keep common-auth free of any global line.
+            cmd = f'''set -u
+ETC={PAM_DIR}; MARK="{PAM_MARK}"
+for f in "$ETC"/*; do
+  [ -f "$f" ] || continue
+  grep -q "$MARK" "$f" || continue
+  sed -i -E 's/(pam_fprintd\\.so)[^#]*/\\1 max-tries={max_tries} timeout={timeout} /' "$f"
+done
+for cf in common-auth common-auth-pc; do
+  [ -f "$ETC/$cf" ] && grep -q pam_fprintd "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
+done
+true'''
             rc, _, err = run_as_root(cmd)
             def _done():
                 btn.set_sensitive(True)
@@ -934,11 +1036,13 @@ class CS9711Window(Adw.ApplicationWindow):
     def build_auth_section(self, parent):
         group = Adw.PreferencesGroup(
             title="Where to Use Fingerprint",
-            description="Fingerprint auth is controlled by PAM — these show current status",
+            description="Turn fingerprint on or off for each place independently — "
+                        "password always still works",
         )
         parent.append(group)
 
         self.auth_rows = {}
+        self._auth_updating = False
         icons = {
             "Login screen": "system-users-symbolic",
             "Lock screen": "system-lock-screen-symbolic",
@@ -947,16 +1051,53 @@ class CS9711Window(Adw.ApplicationWindow):
         }
 
         for name, icon in icons.items():
-            row = Adw.ActionRow(title=name, subtitle="Checking...")
+            row = Adw.SwitchRow(title=name, subtitle="Checking...")
             row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+            row.connect("notify::active", self.on_auth_toggle, name)
             self.auth_rows[name] = row
             group.add(row)
 
     def refresh_auth_locations(self):
-        locations = get_pam_auth_locations()
+        self._set_auth_switches(get_pam_auth_locations())
+
+    def _set_auth_switches(self, locations):
+        """Set switch positions from real state without firing the toggle handler."""
+        self._auth_updating = True
         for name, row in self.auth_rows.items():
-            enabled = locations.get(name, False)
-            row.set_subtitle("Enabled" if enabled else "Not configured")
+            enabled = bool(locations.get(name, False))
+            row.set_active(enabled)
+            row.set_subtitle("On" if enabled else "Off")
+        self._auth_updating = False
+
+    def on_auth_toggle(self, row, _pspec, name):
+        if self._auth_updating:
+            return
+        enable = row.get_active()
+        try:
+            mt = int(self.tries_adj.get_value())
+            to = int(self.timeout_adj.get_value())
+        except Exception:
+            mt, to = 7, 30
+        cmd = pam_toggle_cmd(name, enable, mt, to)
+        row.set_sensitive(False)
+        row.set_subtitle("Applying…")
+
+        def work():
+            rc, out, err = run_as_root(cmd)
+            GLib.idle_add(self._after_auth_toggle, name, enable, rc, err)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _after_auth_toggle(self, name, enable, rc, err):
+        self.auth_rows[name].set_sensitive(True)
+        if rc != 0:
+            log.warning(f"PAM toggle failed for {name}: rc={rc} err={err!r}")
+            self.show_toast(f"Couldn't change “{name}” — authentication cancelled or failed")
+        else:
+            self.show_toast(f"Fingerprint {'enabled' if enable else 'disabled'} for {name}")
+        # Re-read the real state — it's authoritative and reverts the switch if needed.
+        self._set_auth_switches(get_pam_auth_locations())
+        return False
 
     # ========================================================================
     # Maintenance Section
@@ -1470,10 +1611,8 @@ class CS9711Window(Adw.ApplicationWindow):
         self.tries_adj.set_value(max_tries)
         self.timeout_adj.set_value(timeout)
 
-        # Auth locations
-        for name, row in self.auth_rows.items():
-            enabled = auth_locs.get(name, False)
-            row.set_subtitle("Enabled" if enabled else "Not configured")
+        # Auth locations (independent per-service switches)
+        self._set_auth_switches(auth_locs)
 
         # First-launch enrollment prompt — only once, only if no fingers enrolled
         if not self._first_refresh_done:

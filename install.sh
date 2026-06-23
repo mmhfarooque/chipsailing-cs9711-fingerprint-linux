@@ -149,69 +149,55 @@ get_lib_path() {
 # Configure PAM (distro-aware)
 # ============================================================================
 configure_pam() {
-    # 1) Debian/Ubuntu canonical path: edit /usr/share/pam-configs/fprintd
-    #    and let pam-auth-update wire it into the PAM stack. This is the only
-    #    method that survives package upgrades and pam-auth-update regenerations.
-    if command -v pam-auth-update &>/dev/null && [ -f /usr/share/pam-configs/fprintd ]; then
-        # Replace shipped "max-tries=1 timeout=10 # debug" with sensible defaults.
-        # Use a tolerant regex so future profile tweaks don't break us.
-        if ! grep -q "max-tries=7 timeout=30" /usr/share/pam-configs/fprintd; then
-            sudo sed -i -E \
-                's/(pam_fprintd\.so)[[:space:]]+max-tries=[0-9]+[[:space:]]+timeout=[0-9]+([[:space:]]+#[[:space:]]*debug)?/\1 max-tries=7 timeout=30/' \
-                /usr/share/pam-configs/fprintd
-            ok "Set max-tries=7 timeout=30 in /usr/share/pam-configs/fprintd"
-        else
-            ok "/usr/share/pam-configs/fprintd already at max-tries=7 timeout=30"
-        fi
+    # Per-service fingerprint setup — matches the GUI's independent per-location
+    # switches. Enables fprintd in each service's OWN PAM file (login / display
+    # manager, lock screen, sudo, polkit) rather than the shared common stack, so
+    # each location can be toggled independently afterwards.
+    #
+    # Cross-distro & reversible:
+    #   * vendor file in /usr/lib/pam.d (openSUSE/Fedora) -> /etc/pam.d override
+    #   * file already in /etc/pam.d (Debian/Ubuntu)       -> edited in place
+    #   * a service whose vendor file already ships fprintd (kde-fingerprint /
+    #     gdm-fingerprint) is left to the vendor — it's already on.
+    # The full stack incl. the password path is always preserved, and fprintd is
+    # only ever 'sufficient', so password authentication can never break.
+    info "Configuring fingerprint per-service (login, lock screen, sudo, polkit)..."
 
-        # Enable in the PAM stack — idempotent, safe to run repeatedly.
-        # --package uses stored selections; --enable forces fprintd on.
-        sudo pam-auth-update --enable fprintd
-        ok "Fingerprint auth enabled in PAM stack via pam-auth-update"
-        return
+    local tmp; tmp="$(mktemp)"
+    cat > "$tmp" <<'PAMEOF'
+#!/usr/bin/env bash
+set -u
+ETC=/etc/pam.d; VENDOR=/usr/lib/pam.d; MARK="# cs9711-managed"
+INS="auth\tsufficient\tpam_fprintd.so\tmax-tries=7 timeout=30\t$MARK"
+has_vendor_fp(){ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\.so' "$VENDOR/$1"; }
+ensure_copy(){ [ -f "$ETC/$1" ] || { [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }; }
+add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" && return 0
+  awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {print ins; d=1} {print} END{if(!d)exit 3}' "$ETC/$1" > "$ETC/$1.tmp" \
+    || awk -v ins="$INS" 'NR==1{print; print ins; next}{print}' "$ETC/$1" > "$ETC/$1.tmp"
+  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }
+# Enable a location: if a native fingerprint service exists (vendor ships fprintd,
+# e.g. kde-fingerprint/gdm-fingerprint) it's already on; otherwise add our line to
+# every existing generic service file for that location.
+enable_loc(){ local native='' s; for s in "$@"; do has_vendor_fp "$s" && native=x; done
+  [ -n "$native" ] && return 0
+  for s in "$@"; do [ -f "$ETC/$s" ] || [ -f "$VENDOR/$s" ] || continue; add_fp "$s"; done; }
+enable_loc sddm gdm-fingerprint gdm-password lightdm lxdm
+enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-password cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+enable_loc sudo sudo-i
+enable_loc polkit-1 polkit-1-kde-1
+# Per-service files are authoritative: drop any global fprintd from the common stack.
+for cf in common-auth common-auth-pc; do
+  [ -f "$ETC/$cf" ] && grep -q pam_fprintd "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
+done
+PAMEOF
+
+    sudo bash "$tmp"; local rc=$?
+    rm -f "$tmp"
+    if [ "$rc" -eq 0 ]; then
+        ok "Fingerprint enabled per-service — toggle any location in the GUI ('Where to Use Fingerprint')"
+    else
+        warn "Per-service PAM setup hit an issue — configure via the GUI; password login is unaffected"
     fi
-
-    # 2) Fedora/RHEL canonical path: authselect
-    if command -v authselect &>/dev/null; then
-        if authselect current 2>/dev/null | grep -q "with-fingerprint"; then
-            ok "Fingerprint auth already enabled via authselect"
-        else
-            info "Enabling fingerprint auth via authselect..."
-            sudo authselect enable-feature with-fingerprint 2>/dev/null \
-                && ok "authselect: with-fingerprint enabled" \
-                || warn "authselect fingerprint enable failed — configure manually"
-        fi
-        # Also bump the system-auth max-tries if the line is present
-        for PAM_FILE in /etc/pam.d/system-auth /etc/pam.d/fingerprint-auth; do
-            if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE" \
-                    && ! grep -q "max-tries=7" "$PAM_FILE"; then
-                sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
-                ok "PAM updated in $PAM_FILE: max-tries=7 timeout=30"
-            fi
-        done
-        return
-    fi
-
-    # 3) Fallback: direct edit of any /etc/pam.d/* file that already references fprintd
-    PAM_FILES=(
-        "/etc/pam.d/common-auth"
-        "/etc/pam.d/system-auth"
-        "/etc/pam.d/fingerprint-auth"
-    )
-    for PAM_FILE in "${PAM_FILES[@]}"; do
-        if [ -f "$PAM_FILE" ] && grep -q "pam_fprintd.so" "$PAM_FILE"; then
-            if grep -q "max-tries=7" "$PAM_FILE"; then
-                ok "PAM already configured in $PAM_FILE (max-tries=7 timeout=30)"
-            else
-                sudo sed -i 's/pam_fprintd.so.*/pam_fprintd.so max-tries=7 timeout=30/' "$PAM_FILE"
-                ok "PAM updated in $PAM_FILE: max-tries=7 timeout=30"
-            fi
-            return
-        fi
-    done
-
-    warn "Could not auto-configure PAM (no pam-auth-update, no authselect, no existing pam_fprintd line)"
-    echo "       Configure manually for your distro — see README.md"
 }
 
 # ============================================================================

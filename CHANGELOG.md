@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.0.2] - 2026-06-23
+
+**Per-location fingerprint control — independent on/off switches.**
+
+### Added
+- **"Where to Use Fingerprint" is now four real on/off switches** (Login screen, Lock screen, sudo, polkit) instead of read-only status. Each can be enabled or disabled independently from the GUI.
+- Per-service PAM model: fingerprint is wired into each service's **own** PAM file (`sddm`/display-manager, `kde-fingerprint`/lock, `sudo`, `polkit-1`) rather than the shared `common-auth`, so toggling one location no longer affects the others.
+
+### Fixed
+- **openSUSE PAM was never configured by the installer** (no `pam-auth-update`/`authselect`, and the old fallback only edited a line if one already existed). `configure_pam()` is rewritten to the per-service model and now works on openSUSE too — **deb + rpm parity**.
+- Vendor-dir PAM layout (`/usr/lib/pam.d`) is now detected, so KDE's `kde-fingerprint` lock-screen stack and openSUSE service files are seen correctly.
+- "Apply PAM Settings" (max-tries/timeout) now updates the per-service override files instead of `common-auth`.
+
+### Safety
+- Every override preserves the full vendor stack and adds `pam_fprintd` only as `sufficient`, so **password authentication can never be locked out**. Changes are reversible (remove the override → revert to vendor).
+
+---
+
 ## [2.0.1] - 2026-06-23
 
 **Packaging fix — RPM now builds and is hardware-verified on openSUSE.**

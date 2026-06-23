@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.0.1
+Version:        2.0.2
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -85,6 +85,15 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Tue Jun 23 2026 Mahmud Farooque <farooque7@gmail.com> - 2.0.2-1
+- Per-service PAM control: enable fingerprint independently for login, lock
+  screen, sudo and polkit via each service's own PAM file (not the shared
+  common-auth), so each location can be toggled on/off separately
+- GUI: "Where to Use Fingerprint" is now four real on/off switches
+- installer: configure_pam() rewritten to the per-service model (deb + rpm parity);
+  fixes openSUSE where fingerprint PAM was never wired before
+- Password fallback always preserved (fprintd is only ever 'sufficient')
+
 * Tue Jun 23 2026 Mahmud Farooque <farooque7@gmail.com> - 2.0.1-1
 - Sync spec Version with VERSION file (was stuck at 1.2.0, broke rpmbuild %%setup)
 - Cross-distro BuildRequires: correct openSUSE names via %%if suse_version
