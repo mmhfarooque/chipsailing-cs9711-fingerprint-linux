@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.0.2
+Version:        2.1.0
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,18 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.1.0-1
+- Survive a distro OpenCV major upgrade (issue #2): sigfm now resolves OpenCV as
+  opencv4 -> opencv5 -> opencv (pkg-config) -> CMake OpenCV, so an OpenCV 4 -> 5
+  bump no longer fails the build or strands an installed driver
+- Update guard detects an unloadable (not just replaced) driver, restores from
+  cache only when that copy still loads, and names the vanished libraries;
+  pacman/dnf hooks now fire on opencv transactions too
+- GUI reports a stranded driver as BROKEN with the missing libraries named,
+  instead of a generic not-installed message
+- Apply PAM Settings works on Arch/CachyOS (issue #1) — options are re-stamped
+  onto each enabled per-service file, never the absent common-auth
+
 * Tue Jun 23 2026 Mahmud Farooque <farooque7@gmail.com> - 2.0.2-1
 - Per-service PAM control: enable fingerprint independently for login, lock
   screen, sudo and polkit via each service's own PAM file (not the shared
