@@ -573,11 +573,13 @@ class CS9711Window(Adw.ApplicationWindow):
         clamp = Adw.Clamp(maximum_size=1500, tightening_threshold=1100)
         scroll.set_child(clamp)
 
-        self.columns = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=18,
-            margin_start=16, margin_end=16, margin_top=10, margin_bottom=20,
-        )
-        clamp.set_child(self.columns)
+        # Page = the two columns, then a full-width credit footer beneath them.
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0,
+                       margin_start=16, margin_end=16, margin_top=10, margin_bottom=14)
+        clamp.set_child(page)
+
+        self.columns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        page.append(self.columns)
 
         self.col_left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
                                 hexpand=True, valign=Gtk.Align.START)
@@ -599,6 +601,11 @@ class CS9711Window(Adw.ApplicationWindow):
         self.build_settings_section(self.col_left)
         self.build_auth_section(self.col_right)
         self.build_maintenance_section(self.col_right)
+
+        # Visible author credit. The About dialog carries the same details, but
+        # a dialog has to be opened to be seen — a footer states authorship on
+        # the window itself, which is what a user actually reads.
+        self.build_footer(page)
 
         # Below this width two columns stop being readable — stack them. This is
         # what keeps the app correct in a narrow/mobile GNOME context, in a
@@ -654,6 +661,35 @@ class CS9711Window(Adw.ApplicationWindow):
     # ========================================================================
     # Status Section
     # ========================================================================
+
+    def build_footer(self, parent):
+        """Full-width credit line under both columns.
+
+        Pango markup links; GTK opens them via the default handler, so no
+        signal wiring is needed. Ampersands are spelled out — markup would
+        need them escaped and it reads better as a word here anyway.
+        """
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL,
+                            margin_top=14, margin_bottom=10)
+        sep.add_css_class("dim-label")
+        parent.append(sep)
+
+        credit = Gtk.Label(use_markup=True, justify=Gtk.Justification.CENTER,
+                           wrap=True, css_classes=["dim-label", "caption"])
+        credit.set_markup(
+            f'Developed by <a href="{AUTHOR_URL}">{APP_AUTHOR}</a>'
+            f'  ·  <a href="mailto:{APP_AUTHOR_EMAIL}">{APP_AUTHOR_EMAIL}</a>'
+            f'  ·  <a href="{PROJECT_URL}">Source and issues on GitHub</a>'
+        )
+        parent.append(credit)
+
+        licence = Gtk.Label(
+            label=(f"CS9711 Fingerprint Manager v{APP_VERSION} — MIT licensed. "
+                   "Driver: archeYR/libfprint-CS9711, LGPL-2.1-or-later."),
+            justify=Gtk.Justification.CENTER, wrap=True,
+            css_classes=["dim-label", "caption"], margin_top=2,
+        )
+        parent.append(licence)
 
     def build_status_section(self, parent):
         """Hero card: one glance answers whether fingerprint works right now.

@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.2.0
+Version:        2.2.1
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,11 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.1-1
+- Author credit is now visible on the window itself (footer under both columns,
+  with profile/email/repo links and the dual-licence note), not only inside the
+  About dialog which has to be opened to be seen
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.0-1
 - GUI rebuilt as an adaptive two-column dashboard: everything fits on screen
   instead of a ~1900px single column, and it collapses back to one column

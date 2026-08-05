@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.1] - 2026-08-05
+
+**Author credit is visible in the app, not hidden behind a dialog.**
+
+### Changed
+- v2.2.0 put the developer credit only in the About dialog, which has to be opened before it can be seen. There is now a **footer across the bottom of the window**, under both columns: developer name linking to the GitHub profile, contact email as a mailto link, a link to the source and issue tracker, and the version plus dual-licence line (MIT for this manager, LGPL-2.1-or-later for the patched driver). The About dialog keeps the same details.
+
+---
+
 ## [2.2.0] - 2026-08-05
 
 **GUI rebuilt as an adaptive two-column dashboard — no more endless scrolling.**
