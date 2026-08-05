@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.1.0] - 2026-08-05
+
+**OpenCV-upgrade resilience + Arch/CachyOS PAM apply — fixes #1 and #2.**
+
+### Fixed
+- **A distro OpenCV major upgrade (4 → 5) no longer strands the driver** (issue #2, reported on CachyOS with `opencv 5.0.0-1`). The patched `libfprint` links against specific OpenCV sonames; when the distro removes them, `fprintd` silently loses the device while `lsusb` still shows it — and the old restore-from-cache guard could not help, because the cached copy was built against the same vanished sonames.
+  - The sigfm build patch now resolves OpenCV as `opencv4` → `opencv5` → `opencv` (pkg-config), then falls back to **CMake's `OpenCV`** — which works on Arch-family systems even when no `.pc` file is shipped. Trees still carrying the old two-step patch are upgraded in place, so a plain `./reinstall.sh` picks this up.
+  - Applied identically in `install.sh`, `reinstall.sh`, the container build, **PKGBUILD**, the **RPM spec** and the **deb build** (the packaged builds previously still hard-required `opencv4`).
+- **The update guard now detects an unloadable driver**, not just a replaced one: after every package transaction it `ldd`-checks the active library, restores from cache only when the cached copy itself still loads, and otherwise logs exactly which libraries vanished and flags the state for the GUI. The pacman and dnf hooks additionally **fire on `opencv` transactions**, not just `libfprint`.
+- **GUI diagnoses the stranded-driver state** (issue #2's confusing symptom): when `fprintd` reports no device, the Driver status row now runs a loadability check and shows *BROKEN — missing libopencv_… (system OpenCV upgrade?) — use Maintenance → Rebuild Driver* instead of a generic not-installed message.
+- **“Apply PAM Settings” now works on Arch/CachyOS** (issue #1). It re-stamps max-tries/timeout onto every location that is currently enabled, through the same per-service files the switches manage — no `common-auth` involved, which Arch does not have. All locations are combined into one `pkexec` call, and with nothing enabled the GUI now says to turn a location switch on instead of silently claiming success.
+- Per-service insertion now also anchors on `system-auth` / `system-login` includes (Arch-family), not just `common-auth`.
+
+### Changed
+- `reinstall.sh` refreshes the update guard and package-manager hooks on every rebuild, so existing installs receive the new guard without rerunning `install.sh`.
+- Guard/hook installation moved to shared `helpers/install-guard.sh` + `helpers/cs9711-update-guard`; the OpenCV meson patch to `helpers/opencv-flex.sh` (PKGBUILD/spec carry an inline copy — they build from the bare fork checkout).
+
+---
+
 ## [2.0.2] - 2026-06-23
 
 **Per-location fingerprint control — independent on/off switches.**

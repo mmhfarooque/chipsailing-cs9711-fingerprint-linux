@@ -1,0 +1,71 @@
+#!/bin/bash
+# CS9711 update guard — run by package-manager hooks after every transaction.
+# Installed to /usr/local/bin by install.sh / reinstall.sh (__LOG__ replaced).
+#
+# Two failure modes are handled:
+#   1. A libfprint update replaced/shadowed the patched lib (marker check) —
+#      restored from the root-owned cache with a plain file copy. The cache is
+#      only used if its copy is itself still loadable on this system.
+#   2. A library the driver links against was upgraded away (e.g. the distro
+#      moved OpenCV 4 -> 5, issue #2): the lib still contains the cs9711
+#      marker but can no longer be loaded, so fprintd sees no scanner while
+#      lsusb does. A file copy cannot fix that — log it and flag it so the
+#      GUI tells the user to rebuild instead of chasing USB ghosts.
+#
+# Never compiles, never runs anything from a user-writable directory, and is
+# fail-safe: it never blocks or fails the package transaction.
+# Some hook environments carry a minimal PATH — pin it so ldconfig/ldd/awk
+# always resolve (a missing ldconfig would misread as a missing driver).
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+CACHE_DIR="${CS9711_CACHE_DIR:-/var/lib/cs9711-fingerprint}"
+BROKEN_FLAG="$CACHE_DIR/BROKEN"
+LOGF="__LOG__"
+glog(){ echo "$(date '+%F %T') [GUARD] $1" >> "$LOGF" 2>/dev/null; }
+
+[ -f "$CACHE_DIR/install-dir" ] || exit 0
+
+resolved(){ ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}'; }
+missing_libs(){ ldd "$1" 2>/dev/null | awk '/not found/{print $1}' | sort -u | tr '\n' ' '; }
+
+restore(){
+    DIR=$(cat "$CACHE_DIR/install-dir")
+    mkdir -p "$DIR" 2>/dev/null
+    cp -a "$CACHE_DIR"/libfprint-2.so* "$DIR"/ 2>/dev/null
+    if [ -f "$CACHE_DIR/FPrint-2.0.typelib" ] && [ -s "$CACHE_DIR/typelib-dir" ]; then
+        TDIR=$(cat "$CACHE_DIR/typelib-dir"); mkdir -p "$TDIR" 2>/dev/null
+        cp -a "$CACHE_DIR/FPrint-2.0.typelib" "$TDIR"/ 2>/dev/null
+    fi
+    ldconfig 2>/dev/null
+    systemctl restart fprintd >/dev/null 2>&1
+}
+
+RESOLVED=$(resolved)
+
+# Case 1: patched driver gone (stock lib shadowing after a libfprint update).
+if [ -z "$RESOLVED" ] || ! grep -aq "cs9711" "$RESOLVED" 2>/dev/null; then
+    CACHED_SO=$(ls "$CACHE_DIR"/libfprint-2.so.2* 2>/dev/null | head -1)
+    MISS_CACHE=""
+    [ -n "$CACHED_SO" ] && MISS_CACHE=$(missing_libs "$CACHED_SO")
+    if [ -n "$CACHED_SO" ] && [ -z "$MISS_CACHE" ]; then
+        glog "active libfprint ($RESOLVED) lacks cs9711 driver — restoring from cache"
+        restore
+        glog "restore complete"
+        RESOLVED=$(resolved)
+    else
+        glog "active libfprint lacks cs9711 AND the cache copy is unloadable (missing: $MISS_CACHE) — rebuild required (GUI: Maintenance > Rebuild Driver, or ./reinstall.sh)"
+        echo "missing-libs: $MISS_CACHE" > "$BROKEN_FLAG" 2>/dev/null
+        chmod 644 "$BROKEN_FLAG" 2>/dev/null
+        exit 0
+    fi
+fi
+
+# Case 2: driver present but unloadable — a dependency was upgraded away.
+MISS=$(missing_libs "$RESOLVED")
+if [ -n "$MISS" ]; then
+    glog "patched libfprint is unloadable — missing: $MISS (likely an OpenCV major upgrade). Rebuild required (GUI: Maintenance > Rebuild Driver, or ./reinstall.sh)"
+    echo "missing-libs: $MISS" > "$BROKEN_FLAG" 2>/dev/null
+    chmod 644 "$BROKEN_FLAG" 2>/dev/null
+else
+    rm -f "$BROKEN_FLAG" 2>/dev/null
+fi
+exit 0

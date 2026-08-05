@@ -29,6 +29,13 @@ prepare() {
         libfprint/sigfm/meson.build
     sed -i '/^sigfm_tests/i if doctest.found()' libfprint/sigfm/meson.build
     echo "endif" >> libfprint/sigfm/meson.build
+    # OpenCV version-resilient (issue #2) — inline copy of helpers/opencv-flex.sh:
+    # opencv4 -> opencv5 -> opencv pkg-config names, then CMake's OpenCV, so a
+    # distro OpenCV 4 -> 5 bump (CachyOS 2026-07) doesn't fail the build.
+    if ! grep -q "method: 'cmake'" libfprint/sigfm/meson.build; then
+        sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: false)\nendif\nif not opencv.found()\n  opencv = dependency('opencv', required: false)\nendif\nif not opencv.found()\n  opencv = dependency('OpenCV', method: 'cmake', required: true)\nendif|" \
+            libfprint/sigfm/meson.build
+    fi
 }
 
 build() {

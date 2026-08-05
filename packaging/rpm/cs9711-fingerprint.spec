@@ -44,6 +44,13 @@ sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: 
     libfprint/sigfm/meson.build
 sed -i '/^sigfm_tests/i if doctest.found()' libfprint/sigfm/meson.build
 echo "endif" >> libfprint/sigfm/meson.build
+# OpenCV version-resilient (issue #2) — inline copy of helpers/opencv-flex.sh:
+# opencv4 -> opencv5 -> opencv pkg-config names, then CMake's OpenCV, so a
+# distro OpenCV major bump doesn't fail the build.
+if ! grep -q "method: 'cmake'" libfprint/sigfm/meson.build; then
+    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: false)\nendif\nif not opencv.found()\n  opencv = dependency('opencv', required: false)\nendif\nif not opencv.found()\n  opencv = dependency('OpenCV', method: 'cmake', required: true)\nendif|" \
+        libfprint/sigfm/meson.build
+fi
 
 %build
 cd libfprint-CS9711

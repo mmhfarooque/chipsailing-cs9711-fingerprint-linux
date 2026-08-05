@@ -52,6 +52,9 @@ fi
 
 # Make doctest optional (only needed for tests, not the driver)
 SIGFM_MESON="$DRIVER_DIR/libfprint/sigfm/meson.build"
+# OpenCV version-resilient (opencv4 -> opencv5 -> opencv -> cmake), issue #2
+source "$PROJECT_DIR/helpers/opencv-flex.sh"
+patch_opencv_flex "$SIGFM_MESON"
 if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
     sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" "$SIGFM_MESON"
     if ! grep -q "if doctest.found()" "$SIGFM_MESON"; then

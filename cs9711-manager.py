@@ -182,6 +182,29 @@ def is_driver_installed():
     return installed
 
 
+def driver_health():
+    """Loadability check on the active libfprint: ('ok'|'broken'|'absent', detail).
+
+    'broken' means the resolved library exists but carries unresolvable
+    dependencies — the classic cause is a distro OpenCV major upgrade (4 -> 5)
+    removing the sonames the driver was built against (issue #2). fprintd then
+    reports no device while lsusb still sees the scanner, which used to read
+    as a USB problem. detail = the missing library names.
+    """
+    rc, out, _ = run_cmd(
+        ["sh", "-c", "ldconfig -p 2>/dev/null | awk '/libfprint-2\\.so\\.2 /{print $NF; exit}'"]
+    )
+    path = out.strip()
+    if not path or not os.path.exists(path):
+        return "absent", ""
+    rc, out, err = run_cmd(["ldd", path], timeout=15)
+    missing = sorted({ln.split()[0] for ln in out.splitlines() if "not found" in ln})
+    if missing:
+        log.warning(f"driver_health: {path} unloadable — missing {missing}")
+        return "broken", ", ".join(missing)
+    return "ok", path
+
+
 def get_enrolled_fingers():
     rc, out, err = run_cmd(["fprintd-list", os.environ.get("USER", "nobody")])
     fingers = []
@@ -357,7 +380,7 @@ has_vendor_fp(){{ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\\.so' "$VEN
 ensure_copy(){{ [ -f "$ETC/$1" ] || {{ [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }}; }}
 strip_ours(){{ [ -f "$ETC/$1" ] && {{ grep -v "$MARK" "$ETC/$1" > "$ETC/$1.tmp" && mv "$ETC/$1.tmp" "$ETC/$1"; }}; true; }}
 add_fp(){{ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; strip_ours "$1"
-  awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {{print ins; d=1}} {{print}} END{{if(!d)exit 3}}' "$ETC/$1" > "$ETC/$1.tmp" \\
+  awk -v ins="$INS" '!d && $1=="auth" && /common-auth|system-auth|system-login|system-local-login/ {{print ins; d=1}} {{print}} END{{if(!d)exit 3}}' "$ETC/$1" > "$ETC/$1.tmp" \\
     || awk -v ins="$INS" 'NR==1{{print; print ins; next}} {{print}}' "$ETC/$1" > "$ETC/$1.tmp"
   mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }}
 revert_vendor(){{ [ -f "$ETC/$1" ] && grep -q "$MARK" "$ETC/$1" && rm -f "$ETC/$1"; true; }}
@@ -1003,9 +1026,31 @@ class CS9711Window(Adw.ApplicationWindow):
         btn.set_label("Applying...")
 
         def do_apply():
-            # Per-service model: update max-tries/timeout on every override we manage
-            # (tagged with PAM_MARK), and keep common-auth free of any global line.
-            cmd = f'''set -u
+            # Re-stamp the options onto every location that is currently ON,
+            # through the same per-service path the switches use. This is what
+            # makes Apply work on Arch/CachyOS too (issue #1): there is no
+            # /etc/pam.d/common-auth there, and nothing global is ever needed —
+            # each enabled service file gets its own line. All locations are
+            # combined into ONE root script so pkexec prompts once, not four
+            # times. With nothing enabled there is nothing to write, so say so
+            # instead of silently claiming success.
+            locations = get_pam_auth_locations()
+            enabled = [n for n, on in locations.items() if on]
+            if not enabled:
+                def _noop():
+                    btn.set_sensitive(True)
+                    btn.set_label("Apply PAM Settings")
+                    self.show_toast(
+                        "Nothing enabled yet — turn on a switch under "
+                        "“Where to Use Fingerprint”; these settings apply with it"
+                    )
+                    return False
+                GLib.idle_add(_noop)
+                return
+            parts = [pam_toggle_cmd(n, True, max_tries, timeout) for n in enabled]
+            # Safety net: refresh options on any other override we manage, and
+            # keep the global common-auth files free of stray fprintd lines.
+            parts.append(f'''set -u
 ETC={PAM_DIR}; MARK="{PAM_MARK}"
 for f in "$ETC"/*; do
   [ -f "$f" ] || continue
@@ -1015,15 +1060,20 @@ done
 for cf in common-auth common-auth-pc; do
   [ -f "$ETC/$cf" ] && grep -q pam_fprintd "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
 done
-true'''
-            rc, _, err = run_as_root(cmd)
+true''')
+            rc, _, err = run_as_root("\n".join(parts))
             def _done():
                 btn.set_sensitive(True)
                 btn.set_label("Apply PAM Settings")
                 if rc == 0:
-                    self.show_toast(f"PAM updated: {max_tries} tries, {timeout}s timeout")
+                    self.show_toast(
+                        f"PAM updated: {max_tries} tries, {timeout}s timeout "
+                        f"(applied to: {', '.join(enabled)})"
+                    )
                 else:
                     self.show_toast(f"Failed: {err[:80]}")
+                # switches re-read real state — authoritative
+                self._set_auth_switches(get_pam_auth_locations())
                 return False
             GLib.idle_add(_done)
 
@@ -1562,25 +1612,37 @@ true'''
             # Gather all data in background
             scanner = is_scanner_connected()
             driver = is_driver_installed()
+            # Only pay for the ldd health probe when fprintd can't see the
+            # device — that's exactly the state a stranded driver produces.
+            health = ("ok", "") if driver else driver_health()
             fingers = get_enrolled_fingers()
             delay = get_retry_delay()
             max_tries, timeout, pam_file = get_pam_settings()
             auth_locs = get_pam_auth_locations()
 
             # Update UI on main thread
-            GLib.idle_add(self._apply_refresh, scanner, driver, fingers,
+            GLib.idle_add(self._apply_refresh, scanner, driver, health, fingers,
                           delay, max_tries, timeout, auth_locs)
 
         threading.Thread(target=do_refresh, daemon=True).start()
 
-    def _apply_refresh(self, scanner, driver, fingers, delay, max_tries, timeout, auth_locs):
+    def _apply_refresh(self, scanner, driver, health, fingers, delay, max_tries, timeout, auth_locs):
         # Status
         self.status_scanner.set_subtitle(
             "Connected (USB 2541:0236)" if scanner else "Not detected — check USB"
         )
-        self.status_driver.set_subtitle(
-            "Installed and working" if driver else "Not installed or scanner not detected"
-        )
+        if driver:
+            self.status_driver.set_subtitle("Installed and working")
+        elif health[0] == "broken":
+            # A system library the driver links against was upgraded away
+            # (usually an OpenCV 4 -> 5 bump). Rebuilding relinks against the
+            # new version — do NOT chase USB/cable ghosts in this state.
+            self.status_driver.set_subtitle(
+                f"BROKEN — missing {health[1]} (system OpenCV upgrade?) — "
+                "use Maintenance > Rebuild Driver"
+            )
+        else:
+            self.status_driver.set_subtitle("Not installed or scanner not detected")
         friendly_fingers = [FINGER_NAMES.get(f, f) for f in fingers]
         self.status_fingers.set_subtitle(
             ", ".join(friendly_fingers) if fingers else "None enrolled"

@@ -317,13 +317,11 @@ if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
     ok "Made doctest optional (not needed for driver)"
 fi
 
-# Make OpenCV version-flexible: prefer opencv4, fall back to opencv5.
-# Newer distros (Fedora 44+, and future Ubuntu/openSUSE/Arch) ship OpenCV 5,
-# where the fork's hardcoded opencv4 'required: true' fails the whole build.
-if [ -f "$SIGFM_MESON" ] && grep -q "dependency('opencv4', required: true)" "$SIGFM_MESON"; then
-    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: true)\nendif|" "$SIGFM_MESON"
-    ok "OpenCV dependency made version-flexible (opencv4 -> opencv5 fallback)"
-fi
+# Make OpenCV version-resilient (issue #2): opencv4 -> opencv5 -> opencv
+# pkg-config names, then CMake's OpenCV — survives a distro OpenCV major bump.
+source "$SCRIPT_DIR/helpers/opencv-flex.sh"
+patch_opencv_flex "$SIGFM_MESON"
+ok "OpenCV dependency made version-resilient (opencv4/opencv5/opencv/cmake)"
 echo ""
 
 # ---- Step 4: Build ----
@@ -409,86 +407,18 @@ echo ""
 # libfprint and broke fingerprint." A package-manager hook runs after every
 # transaction; if our patched driver is no longer the active one, it rebuilds.
 echo "[7b/8] Installing update guard (re-applies driver after system updates)..."
-GUARD_BIN="/usr/local/bin/cs9711-update-guard"
-sudo tee "$GUARD_BIN" >/dev/null << 'GUARDEOF'
-#!/bin/bash
-# CS9711 update guard — run by package-manager hooks after every transaction.
-# If a system update shadowed/removed our patched libfprint (detected by the
-# ABSENCE of the cs9711 driver marker in the libfprint ld.so now resolves),
-# restore it from the ROOT-OWNED cache via a plain file copy — never compiles,
-# never runs anything from a user-writable directory. Fail-safe: never blocks
-# the package transaction.
-CACHE_DIR="/var/lib/cs9711-fingerprint"
-LOGF="__LOG__"
-glog(){ echo "$(date '+%F %T') [GUARD] $1" >> "$LOGF" 2>/dev/null; }
-[ -f "$CACHE_DIR/install-dir" ] || exit 0
-RESOLVED=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
-# If the active libfprint still carries the cs9711 driver, nothing to do.
-if [ -n "$RESOLVED" ] && grep -aq "cs9711" "$RESOLVED" 2>/dev/null; then
-    exit 0
-fi
-DIR=$(cat "$CACHE_DIR/install-dir")
-glog "active libfprint ($RESOLVED) lacks cs9711 driver — restoring from cache to $DIR"
-mkdir -p "$DIR" 2>/dev/null
-cp -a "$CACHE_DIR"/libfprint-2.so* "$DIR"/ 2>/dev/null
-if [ -f "$CACHE_DIR/FPrint-2.0.typelib" ] && [ -s "$CACHE_DIR/typelib-dir" ]; then
-    TDIR=$(cat "$CACHE_DIR/typelib-dir"); mkdir -p "$TDIR" 2>/dev/null
-    cp -a "$CACHE_DIR/FPrint-2.0.typelib" "$TDIR"/ 2>/dev/null
-fi
-ldconfig 2>/dev/null
-systemctl restart fprintd >/dev/null 2>&1
-glog "restore complete"
-exit 0
-GUARDEOF
-sudo sed -i "s|__LOG__|$LOG_FILE|g" "$GUARD_BIN"
-sudo chmod +x "$GUARD_BIN"
-ok "Update guard installed at $GUARD_BIN"
-
+# Guard + hooks live in helpers/ (shared with reinstall.sh). Since v2.1.0 the
+# guard also detects a driver stranded by an OpenCV major upgrade (issue #2)
+# and the pacman/dnf hooks fire on opencv transactions too.
+source "$SCRIPT_DIR/helpers/install-guard.sh"
+install_update_guard_and_hooks "$PKG_FAMILY" "$LOG_FILE"
+sudo rm -f /var/lib/cs9711-fingerprint/BROKEN 2>/dev/null || true
+ok "Update guard installed at /usr/local/bin/cs9711-update-guard"
 case "$PKG_FAMILY" in
-    apt)
-        echo 'DPkg::Post-Invoke { "/usr/local/bin/cs9711-update-guard || true"; };' \
-            | sudo tee /etc/apt/apt.conf.d/99-cs9711-guard >/dev/null
-        ok "APT hook installed — driver survives 'apt upgrade'"
-        ;;
-    dnf)
-        if command -v dnf5 >/dev/null 2>&1 || [ -d /etc/dnf/libdnf5-plugins ]; then
-            # Fedora 41+ / dnf5: libdnf5 actions plugin.
-            # Format: callback_name:package_filter:direction:options:command (5 fields)
-            sudo dnf install -y libdnf5-plugin-actions >/dev/null 2>&1 || true
-            sudo mkdir -p /etc/dnf/libdnf5-plugins/actions.d
-            echo 'post_transaction:libfprint*:::/usr/local/bin/cs9711-update-guard' \
-                | sudo tee /etc/dnf/libdnf5-plugins/actions.d/cs9711.actions >/dev/null
-            ok "dnf5 actions hook installed (libdnf5-plugin-actions)"
-        elif [ -d /etc/dnf/plugins/post-transaction-actions.d ] \
-                || sudo dnf install -y python3-dnf-plugin-post-transaction-actions >/dev/null 2>&1; then
-            # dnf4: post-transaction-actions plugin. Format: pkg_filter:state:command
-            sudo mkdir -p /etc/dnf/plugins/post-transaction-actions.d
-            echo 'libfprint*:any:/usr/local/bin/cs9711-update-guard' \
-                | sudo tee /etc/dnf/plugins/post-transaction-actions.d/cs9711.action >/dev/null
-            ok "dnf post-transaction hook installed"
-        else
-            warn "dnf: couldn't wire an auto-hook — guard binary is installed;"
-            echo "       run ./reinstall.sh after a libfprint update. See COMPAT-CHECKLIST.md"
-        fi
-        ;;
-    pacman)
-        sudo mkdir -p /etc/pacman.d/hooks 2>/dev/null || true
-        sudo tee /etc/pacman.d/hooks/cs9711.hook >/dev/null << 'PHOOK'
-[Trigger]
-Operation = Upgrade
-Type = Package
-Target = libfprint
-
-[Action]
-Description = Re-applying CS9711 fingerprint driver patch...
-When = PostTransaction
-Exec = /usr/local/bin/cs9711-update-guard
-PHOOK
-        ok "pacman hook installed"
-        ;;
-    zypper)
-        warn "openSUSE: no auto-hook wired — run ./reinstall.sh after a libfprint update"
-        ;;
+    apt)    ok "APT hook installed — driver survives 'apt upgrade'" ;;
+    dnf)    ok "dnf hook installed — fires on libfprint AND opencv updates" ;;
+    pacman) ok "pacman hook installed — fires on libfprint AND opencv updates" ;;
+    zypper) warn "openSUSE: no auto-hook wired — run ./reinstall.sh after a libfprint/OpenCV update" ;;
 esac
 echo ""
 

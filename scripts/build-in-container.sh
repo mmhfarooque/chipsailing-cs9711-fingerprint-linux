@@ -69,11 +69,10 @@ SIGFM=libfprint/sigfm/meson.build
 # doctest optional
 sed -i "s/dependency('doctest', required: true)/dependency('doctest', required: false)/" "$SIGFM"
 grep -q "if doctest.found()" "$SIGFM" || { sed -i "/^sigfm_tests/i if doctest.found()" "$SIGFM"; echo "endif" >> "$SIGFM"; }
-# OpenCV version-flexible (opencv4 -> opencv5)
-if grep -q "dependency('opencv4', required: true)" "$SIGFM"; then
-    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: true)\nendif|" "$SIGFM"
-fi
-echo ">>> Patches applied (doctest optional + OpenCV flexible)"
+# OpenCV version-resilient (opencv4 -> opencv5 -> opencv -> cmake), issue #2
+source /src/helpers/opencv-flex.sh
+patch_opencv_flex "$SIGFM"
+echo ">>> Patches applied (doctest optional + OpenCV resilient)"
 
 echo ">>> meson setup..."
 meson setup builddir \

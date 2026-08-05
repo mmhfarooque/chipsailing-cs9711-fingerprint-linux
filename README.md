@@ -177,6 +177,18 @@ When your package manager updates `libfprint`, it may overwrite the patched libr
 
 This rebuilds from the existing local source — no re-download needed.
 
+An update guard installed by `install.sh` watches for this automatically on apt, dnf and pacman systems and restores the patched library from a root-owned cache after each transaction.
+
+### OpenCV major upgrades (e.g. CachyOS 4.13 → 5.0)
+
+The driver links against your distro's OpenCV. When a distro moves to a new OpenCV **major** version, the old libraries disappear and the driver can no longer load — `fprintd` reports no device while `lsusb` still shows the scanner. A cache restore cannot fix that (the cached copy was built against the same vanished libraries), so since v2.1.0:
+
+- the guard detects the unloadable state, logs which libraries vanished, and the GUI's Driver status row names them and points at **Maintenance → Rebuild Driver**;
+- the pacman/dnf hooks also fire on `opencv` transactions;
+- the build resolves OpenCV as `opencv4` → `opencv5` → `opencv` → CMake's `OpenCV`, so the rebuild links against whatever your distro now ships.
+
+One `./reinstall.sh` (or the GUI Rebuild button) after the OpenCV upgrade puts everything back.
+
 ## The 1500ms Retry Delay Patch
 
 The upstream driver uses a 250ms delay between scan retries. This is too fast — the scanner burns through all retry attempts before you can reposition your finger.
@@ -187,24 +199,15 @@ The patch is in `patches/cs9711-retry-delay-1500ms.patch`.
 
 ## PAM Configuration
 
-The installer configures PAM for fingerprint auth, picking the right method per distro family (since v1.8.2):
+Since v2.0.2, fingerprint is wired **per service**, not globally: each auth location (login screen, lock screen, `sudo`, polkit) gets the `pam_fprintd` line in its **own** PAM service file, tagged `# cs9711-managed`, and the GUI's four switches control them independently. Nothing is ever written to the shared `common-auth`/`system-auth` stack — which also means the tool works the same on **Arch/CachyOS**, where `/etc/pam.d/common-auth` does not exist at all (v2.1.0 fixed “Apply PAM Settings” accordingly, issue #1).
 
-**Debian / Ubuntu / Mint / Pop!_OS** — edits the canonical `pam-configs` profile and lets `pam-auth-update` wire it into the stack. This is the only method that survives package upgrades and `pam-auth-update` regenerations:
-```bash
-# install.sh sets max-tries=7 / timeout=30 in /usr/share/pam-configs/fprintd, then:
-sudo pam-auth-update --enable fprintd
-```
+The line is only ever added as `sufficient`, with the full vendor stack preserved — **password authentication can never be locked out**, and every change is reversible (toggling off removes only the managed line/override).
 
-**Fedora / RHEL** — via `authselect`:
-```bash
-sudo authselect enable-feature with-fingerprint
-```
-
-**Arch / openSUSE / fallback** — direct edit of `/etc/pam.d/system-auth` or `/etc/pam.d/common-auth`.
-
-Defaults wired by all paths:
+Defaults:
 - **max-tries=7** — 7 fingerprint attempts before falling back to password (default is 1)
 - **timeout=30** — 30-second window for all attempts (default is 10)
+
+“Apply PAM Settings” in the GUI re-stamps these options onto every location that is currently enabled.
 
 ## What It Enables
 
@@ -277,6 +280,7 @@ python3 helpers/set-empty-keyring-password.py
 | Problem | Fix |
 |---------|-----|
 | `No devices available` | Check USB connection. Run `sudo ldconfig`. Run `lsusb \| grep 2541`. |
+| Scanner in `lsusb` but not in `fprintd` after a distro OpenCV upgrade | The driver can no longer load (`ldd` on the patched `libfprint-2.so.2` shows `not found` OpenCV libs). Run `./reinstall.sh` — v2.1.0+ relinks against the new OpenCV. The GUI shows this state as *BROKEN — missing libopencv_…* |
 | `verify-no-match` | Old enrollment data. Run `fprintd-delete $(whoami) && fprintd-enroll`. |
 | System update broke it | Run `./reinstall.sh` or reinstall the .deb/.rpm package. |
 | Scanner not detected | If plugged into a keyboard's USB port, the keyboard **must be connected via USB cable** (not Bluetooth/wireless). See USB Connection Requirement above. |

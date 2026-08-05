@@ -54,11 +54,12 @@ if [ -f "$SIGFM_MESON" ] && grep -q "required: true" "$SIGFM_MESON"; then
     echo "  Made doctest optional"
 fi
 
-# Keep OpenCV version-flexible (opencv4 -> opencv5 fallback) on rebuilds too
-if [ -f "$SIGFM_MESON" ] && grep -q "dependency('opencv4', required: true)" "$SIGFM_MESON"; then
-    sed -i "s|opencv = dependency('opencv4', required: true)|opencv = dependency('opencv4', required: false)\nif not opencv.found()\n  opencv = dependency('opencv5', required: true)\nendif|" "$SIGFM_MESON"
-    echo "  OpenCV dependency made version-flexible (opencv4 -> opencv5 fallback)"
-fi
+# Keep OpenCV version-resilient on rebuilds too (issue #2): opencv4 ->
+# opencv5 -> opencv -> CMake OpenCV. Also upgrades trees still carrying the
+# v2.0.x two-step patch.
+source "$SCRIPT_DIR/helpers/opencv-flex.sh"
+patch_opencv_flex "$SIGFM_MESON"
+echo "  OpenCV dependency made version-resilient (opencv4/opencv5/opencv/cmake)"
 echo ""
 
 # Build
@@ -104,9 +105,18 @@ sleep 2
 
 # Use SUDO_USER or PKEXEC_UID to find the real user when running via pkexec/sudo
 REAL_USER="${SUDO_USER:-${USER}}"
-if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
+if [ "$REAL_USER" = "root" ] && [ -n "${PKEXEC_UID:-}" ]; then
     REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
 fi
+
+# Refresh the update guard + package-manager hooks — v2.1.0 taught them to
+# catch OpenCV upgrades, and an existing install only reruns install.sh rarely,
+# so the rebuild path is where users actually pick this up.
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+source "$SCRIPT_DIR/helpers/install-guard.sh"
+install_update_guard_and_hooks "$(detect_pkg_family)" "${REAL_HOME:-$HOME}/.local/share/cs9711-manager/cs9711.log"
+sudo rm -f /var/lib/cs9711-fingerprint/BROKEN 2>/dev/null || true
+echo "  Update guard + package hooks refreshed"
 
 if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
     echo ""
