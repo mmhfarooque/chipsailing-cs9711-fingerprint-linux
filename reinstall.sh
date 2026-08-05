@@ -81,11 +81,28 @@ echo "[3/4] Installing..."
 sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
 
-# Refresh the root-owned restore cache used by the update guard
+# Same linker-path guarantee as install.sh (issue #2): on Arch/CachyOS
+# /usr/local is not searched, so without this the stock libfprint keeps winning
+# and a rebuild appears to succeed while changing nothing.
+source "$SCRIPT_DIR/helpers/link-path.sh"
+INSTALLED_DIR=$(cs9711_install_libdir builddir)
+echo "  Installed to $INSTALLED_DIR"
+if cs9711_ensure_link_path "$INSTALLED_DIR"; then
+    [ -f "$CS9711_LDCONF" ] && echo "  Linker path extended ($CS9711_LDCONF)"
+else
+    echo ""
+    echo "ERROR: the patched libfprint is at $INSTALLED_DIR but the system still"
+    echo "       resolves $(cs9711_resolved_lib)"
+    echo "       Fingerprint will not work. Please report with:"
+    echo "         ldconfig -p | grep libfprint"
+    echo "         ls -la $INSTALLED_DIR/libfprint*"
+    exit 1
+fi
+
+# Refresh the root-owned restore cache used by the update guard, from meson's
+# real install dir (NOT ldconfig resolution — that cached the stock lib on Arch)
 CACHE_DIR="/var/lib/cs9711-fingerprint"
-INSTALLED_SO=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
-if [ -n "$INSTALLED_SO" ] && [ -e "$INSTALLED_SO" ]; then
-    INSTALLED_DIR=$(dirname "$INSTALLED_SO")
+if [ -e "$INSTALLED_DIR/libfprint-2.so.2" ]; then
     sudo mkdir -p "$CACHE_DIR"
     sudo cp -a "$INSTALLED_DIR"/libfprint-2.so* "$CACHE_DIR"/ 2>/dev/null || true
     echo "$INSTALLED_DIR" | sudo tee "$CACHE_DIR/install-dir" >/dev/null

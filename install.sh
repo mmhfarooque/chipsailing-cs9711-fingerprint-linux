@@ -345,14 +345,41 @@ sudo meson install -C builddir 2>&1 | tail -3
 sudo ldconfig
 ok "Library installed"
 
+# Make sure the install ACTUALLY takes effect. meson installs under /usr/local,
+# which only shadows the distro's libfprint where /usr/local is in the linker
+# path — true on openSUSE/Fedora/Debian, NOT on Arch/CachyOS (issue #2). Without
+# this the stock library keeps winning and fprintd reports no devices while
+# lsusb still shows the scanner.
+source "$SCRIPT_DIR/helpers/link-path.sh"
+INSTALLED_DIR=$(cs9711_install_libdir builddir)
+info "Installed to $INSTALLED_DIR"
+if cs9711_ensure_link_path "$INSTALLED_DIR"; then
+    if [ -f "$CS9711_LDCONF" ]; then
+        ok "Linker path extended ($CS9711_LDCONF) — patched driver now takes precedence"
+    else
+        ok "Patched driver already takes precedence"
+    fi
+else
+    fail "The patched libfprint is installed at $INSTALLED_DIR but the system"
+    echo "       still resolves a different one:"
+    echo "         $(cs9711_resolved_lib)"
+    echo "       Fingerprint will NOT work in this state. Please report this with:"
+    echo "         ldconfig -p | grep libfprint"
+    echo "         ls -la $INSTALLED_DIR/libfprint*"
+    echo "       https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/issues"
+    exit 1
+fi
+
 # Snapshot the installed driver into a ROOT-OWNED cache. The update-guard
 # restores from here after a system upgrade with a plain file copy — so it
 # never executes build files from a user-writable directory as root, and can't
-# fail to compile. We record the exact install dir for the guard to restore to.
+# fail to compile.
+#
+# The source is meson's REAL install dir, not whatever ldconfig resolves: on
+# Arch the old code resolved the stock library and cached that by mistake,
+# leaving the guard silently useless.
 CACHE_DIR="/var/lib/cs9711-fingerprint"
-INSTALLED_SO=$(ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}')
-if [ -n "$INSTALLED_SO" ] && [ -e "$INSTALLED_SO" ]; then
-    INSTALLED_DIR=$(dirname "$INSTALLED_SO")
+if [ -e "$INSTALLED_DIR/libfprint-2.so.2" ]; then
     sudo mkdir -p "$CACHE_DIR"
     sudo cp -a "$INSTALLED_DIR"/libfprint-2.so* "$CACHE_DIR"/ 2>/dev/null || true
     echo "$INSTALLED_DIR" | sudo tee "$CACHE_DIR/install-dir" >/dev/null
@@ -391,9 +418,21 @@ if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
         echo "         fprintd-delete \$(whoami) && fprintd-enroll"
     fi
 else
-    warn "Scanner not yet detected by fprintd"
-    echo "       Try: fprintd-list \$(whoami)"
-    echo "       If 'No devices available', check USB connection and run: sudo ldconfig"
+    # HARD failure, not a warning. The linker-path check above already proved
+    # our driver is the one being resolved, so if fprintd still cannot see the
+    # scanner the install has objectively not worked — and reporting that as a
+    # warning is how issue #2's second half stayed hidden through a run that
+    # "completed with no errors".
+    fail "Driver is active but fprintd still reports no CS9711 device"
+    echo "       Resolved library: $(cs9711_resolved_lib)"
+    echo "       Diagnostics to include in a bug report:"
+    echo "         lsusb | grep 2541:0236"
+    echo "         ldconfig -p | grep libfprint"
+    echo "         ldd \$(ldconfig -p | awk '/libfprint-2\\.so\\.2 /{print \$NF; exit}')"
+    echo "         fprintd-list \$(whoami)"
+    echo "         tail -40 $LOG_FILE"
+    echo "       https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/issues"
+    exit 1
 fi
 echo ""
 

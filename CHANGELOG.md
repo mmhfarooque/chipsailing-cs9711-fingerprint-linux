@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.2] - 2026-08-05
+
+**The installer now verifies that it actually took effect — fixes the second half of #2 on Arch/CachyOS.**
+
+Reported by @josepcarles, who retested v2.1.0 on CachyOS with `opencv 5.0.0-7.1`: the build completed with no errors (so the OpenCV work in v2.1.0 did its job), but enrolment still failed with *No devices available* while `lsusb` showed the scanner.
+
+### Fixed
+- **The patched library was installed where the linker never looks.** `meson` installs under `/usr/local`, which only shadows the distro's own libfprint when `/usr/local/lib{,64}` is in the dynamic linker's search path. openSUSE, Fedora and Debian list it first in `/etc/ld.so.conf`; **Arch and CachyOS do not** — glibc's built-in search covers `/usr/lib` and `/lib` only. So on Arch the stock libfprint kept winning, `fprintd` saw no device, and the install looked successful.
+  - The installer and the rebuild path now check whether the **resolved** libfprint is actually ours (it carries the `cs9711` marker). If not, they add the real install directory to `/etc/ld.so.conf.d/00-cs9711-local.conf`, refresh the cache and re-verify. Reversible: `uninstall.sh` removes the file.
+  - We deliberately do **not** install with `--prefix=/usr`, which would overwrite a distro-owned file that the next package update clobbers anyway.
+  - Diagnostic worth knowing: run `ldd` on the resolved libfprint. Our build links OpenCV (the sigfm matcher needs it); a resolved library with **no OpenCV libraries at all** is the distro's, not ours.
+- **The update guard was caching the wrong library on Arch.** The restore cache was populated from whatever `ldconfig` resolved — which on Arch was the stock library, recorded against `/usr/lib`. The guard was therefore silently useless there. The cache now comes from meson's real install directory.
+- **A failed install no longer reports success.** The post-install check that `fprintd` can see the scanner was a warning; it is now a hard error with the exact diagnostics to paste into a bug report. That warning is how this stayed hidden through a run that finished without errors.
+
+---
+
 ## [2.2.1] - 2026-08-05
 
 **Author credit is visible in the app, not hidden behind a dialog.**

@@ -79,6 +79,10 @@ sudo rm -f "/usr/local/lib/$LIB_ARCH/girepository-1.0/FPrint-2.0.typelib" 2>/dev
 sudo rm -f /usr/local/lib64/libfprint-2.so* 2>/dev/null
 sudo rm -f /usr/local/lib64/girepository-1.0/FPrint-2.0.typelib 2>/dev/null
 sudo rm -f /usr/local/lib/libfprint-2.so* 2>/dev/null
+# Linker-path override added by install.sh on distros that do not search
+# /usr/local by default (Arch/CachyOS — issue #2). Leaving it behind would keep
+# pointing the linker at a directory we just emptied.
+sudo rm -f /etc/ld.so.conf.d/00-cs9711-local.conf 2>/dev/null
 sudo ldconfig
 echo "  Patched library removed"
 echo ""

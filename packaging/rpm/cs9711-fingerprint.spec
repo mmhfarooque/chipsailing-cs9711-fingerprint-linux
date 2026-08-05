@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.2.1
+Version:        2.2.2
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,16 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.2-1
+- Installer now verifies the patched libfprint is the one the linker actually
+  resolves, and extends the linker path via /etc/ld.so.conf.d if not. On
+  Arch/CachyOS /usr/local is not searched, so the stock library kept winning
+  and fprintd reported no device while lsusb saw the scanner (issue #2)
+- Update-guard restore cache is populated from meson's real install directory
+  instead of ldconfig resolution, which cached the STOCK library on Arch
+- A post-install run where fprintd cannot see the scanner is now a hard error
+  with diagnostics, not a warning that let a broken install look successful
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.1-1
 - Author credit is now visible on the window itself (footer under both columns,
   with profile/email/repo links and the dual-licence note), not only inside the
