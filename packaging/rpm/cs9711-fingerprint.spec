@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.2.2
+Version:        2.2.3
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,15 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.3-1
+- Packaging parity: the .deb builds from any distro now (falls back to ar when
+  dpkg-deb is absent), so it can be released from a non-Debian workstation
+- Arch PKGBUILD pkgver was hardcoded at 1.2.0 while VERSION moved on; it now
+  tracks VERSION and build-arch.sh syncs it before building
+- .deb no longer ships meson build artifacts (.p object dir, .symbols file)
+- .deb postinst verifies the linker resolves the patched driver, matching the
+  install.sh check added in 2.2.2
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.2-1
 - Installer now verifies the patched libfprint is the one the linker actually
   resolves, and extends the linker path via /etc/ld.so.conf.d if not. On

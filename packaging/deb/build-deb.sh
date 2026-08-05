@@ -83,10 +83,13 @@ mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/local/lib/$LIB_ARCH"
 mkdir -p "$PKG_DIR/usr/share/doc/$PKG_NAME"
 
-# Copy the built library
-cp -P "$DRIVER_DIR/builddir/libfprint/libfprint-2.so"* "$PKG_DIR/usr/local/lib/$LIB_ARCH/" 2>/dev/null || true
-# Also copy the versioned .so
-find "$DRIVER_DIR/builddir/libfprint/" -name "libfprint-2.so*" -exec cp -P {} "$PKG_DIR/usr/local/lib/$LIB_ARCH/" \;
+# Copy the built library — the real .so and its symlinks ONLY.
+# meson's build tree also holds `libfprint-2.so.2.0.0.p/` (an object dir) and a
+# `.symbols` file; both matched the old glob and got shipped inside the package.
+find "$DRIVER_DIR/builddir/libfprint/" -maxdepth 1 \
+    \( -type f -o -type l \) -name 'libfprint-2.so*' \
+    ! -name '*.symbols' ! -name '*.p' \
+    -exec cp -P {} "$PKG_DIR/usr/local/lib/$LIB_ARCH/" \;
 
 # Copy docs
 cp "$PROJECT_DIR/README.md" "$PKG_DIR/usr/share/doc/$PKG_NAME/"
@@ -130,6 +133,33 @@ set -e
 # Update library cache
 ldconfig
 
+# Verify the packaged driver is the one the linker actually resolves. Debian and
+# Ubuntu ship /usr/local/lib/<triplet> in /etc/ld.so.conf.d, so this normally
+# passes — but a trimmed or derivative image may not, and then the stock
+# libfprint keeps winning while fprintd reports no device (issue #2, seen on
+# Arch). Cheap to check, and it removes a silent-failure mode.
+CS9711_LDCONF=/etc/ld.so.conf.d/00-cs9711-local.conf
+LIBDIR="__LIBDIR__"
+resolved() { PATH=/usr/sbin:/sbin:$PATH ldconfig -p 2>/dev/null \
+    | awk '/libfprint-2\.so\.2 /{print $NF; exit}'; }
+is_ours() { local r; r=$(resolved); [ -n "$r" ] && [ -e "$r" ] \
+    && grep -aq cs9711 "$r" 2>/dev/null; }
+if ! is_ours; then
+    if [ -e "$LIBDIR/libfprint-2.so.2" ]; then
+        echo "  Extending linker path so the patched driver takes precedence"
+        printf '# Added by cs9711-fingerprint. Removed on purge.\n%s\n' "$LIBDIR" \
+            > "$CS9711_LDCONF"
+        chmod 644 "$CS9711_LDCONF"
+        ldconfig
+    fi
+fi
+if ! is_ours; then
+    echo "  WARNING: the system still resolves $(resolved)"
+    echo "           rather than the patched driver in $LIBDIR."
+    echo "           Fingerprint will not work. Please report this:"
+    echo "           https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/issues"
+fi
+
 # Restart fprintd to pick up the new driver
 if systemctl is-active --quiet fprintd 2>/dev/null; then
     systemctl restart fprintd
@@ -169,6 +199,9 @@ echo "  Test:    fprintd-verify"
 echo "  Check:   fprintd-list \$(whoami)"
 echo ""
 EOF
+# The postinst is written as a literal heredoc (so its own $vars survive), so
+# the install libdir is substituted in afterwards.
+sed -i "s|__LIBDIR__|/usr/local/lib/$LIB_ARCH|g" "$PKG_DIR/DEBIAN/postinst"
 chmod 755 "$PKG_DIR/DEBIAN/postinst"
 
 # postrm — runs after removal
@@ -186,7 +219,27 @@ echo ""
 
 # ---- Step 4: Build the .deb ----
 echo "[4/4] Building .deb package..."
-dpkg-deb --build "$PKG_DIR" "$DEB_OUTPUT"
+if command -v dpkg-deb >/dev/null 2>&1; then
+    dpkg-deb --build "$PKG_DIR" "$DEB_OUTPUT"
+else
+    # No dpkg on this host (building the deb from Fedora/openSUSE/Arch). A .deb
+    # is just an ar archive of three members in a fixed order, so assemble it
+    # with binutils ar + tar instead of requiring Debian tooling. Same output.
+    echo "  dpkg-deb not present — assembling with ar (portable path)"
+    command -v ar >/dev/null 2>&1 || { echo "  ERROR: neither dpkg-deb nor ar available"; exit 1; }
+    STAGE=$(mktemp -d)
+    echo "2.0" > "$STAGE/debian-binary"
+    # control.tar.gz: the DEBIAN/ metadata, at the archive root
+    tar -C "$PKG_DIR/DEBIAN" --owner=root --group=root --numeric-owner \
+        -czf "$STAGE/control.tar.gz" .
+    # data.tar.gz: the installed tree, minus DEBIAN/
+    tar -C "$PKG_DIR" --exclude=./DEBIAN --owner=root --group=root --numeric-owner \
+        -czf "$STAGE/data.tar.gz" .
+    rm -f "$DEB_OUTPUT"
+    # Member ORDER is part of the format: debian-binary, control, data.
+    ( cd "$STAGE" && ar rc "$DEB_OUTPUT" debian-binary control.tar.gz data.tar.gz )
+    rm -rf "$STAGE"
+fi
 echo ""
 
 # Cleanup build dir

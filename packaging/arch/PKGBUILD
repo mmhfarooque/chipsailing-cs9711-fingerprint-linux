@@ -4,7 +4,11 @@
 # Changelog: https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/blob/main/CHANGELOG.md
 
 pkgname=cs9711-fingerprint
-pkgver=1.2.0
+# Keep in step with the repo VERSION file. build-arch.sh rewrites this line from
+# VERSION before building, and fails if they disagree — this was hardcoded at
+# 1.2.0 for many releases while VERSION moved on, so pacman's upgrade
+# comparison was wrong. Same class of drift that broke the v2.0.1 RPM.
+pkgver=2.2.3
 pkgrel=1
 pkgdesc="Chipsailing CS9711 USB fingerprint scanner driver with 1500ms retry patch and GTK4 GUI manager"
 arch=('x86_64' 'aarch64')

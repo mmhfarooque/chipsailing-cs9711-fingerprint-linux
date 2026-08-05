@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.3] - 2026-08-05
+
+**Packaging parity: the .deb ships again, the Arch version stops lying, and both packages carry the install verification.**
+
+Until now every release attached only an x86_64 RPM. The .deb build script existed and worked — it was the original packaging path, written on Ubuntu — but no .deb had been built or attached for any recent release.
+
+### Fixed
+- **The .deb can now be built from any distro.** `build-deb.sh` required `dpkg-deb`, so it could only run on a Debian-family machine. A `.deb` is just an `ar` archive of three members in a fixed order, so when `dpkg-deb` is absent the script now assembles it with `ar` and `tar` instead. Same output, no Debian tooling needed — which is what lets it be released from a Fedora/openSUSE/Arch workstation.
+- **The Arch `PKGBUILD` version was hardcoded at `1.2.0`** while `VERSION` had moved on for many releases, so pacman compared the wrong version on upgrade. It now tracks `VERSION`, and `build-arch.sh` syncs it before building. (Same class of drift that broke the v2.0.1 RPM.)
+- **The .deb was shipping build artifacts** — meson's `libfprint-2.so.2.0.0.p/` object directory and a `.symbols` file both matched the copy glob and ended up inside the package. Now only the real library and its symlinks are packaged.
+- **The .deb postinst now verifies the install took effect**, the same check `install.sh` gained in v2.2.2: if the linker does not resolve our patched library it adds the install directory to `/etc/ld.so.conf.d` and re-checks, and warns clearly if it still does not. Debian and Ubuntu normally ship `/usr/local/lib/<triplet>` in the linker path so this passes silently, but a trimmed or derivative image may not — and that silent-failure mode is exactly what issue #2 turned out to be.
+
+### Note on packages
+The RPM and .deb contain **the patched driver only** — the library, plus docs and licence. They do not include the GTK4 GUI manager or `install.sh`. For the GUI, the update guard and the PAM management, use the repository route (`git clone` then `./install.sh`), which remains the supported path on every distro.
+
+There is **no AppImage and cannot be one**: the whole job is patching the system's libfprint and editing `/etc/pam.d`, neither of which a sandboxed bundle can do. Package parity targets are deb and rpm.
+
+---
+
 ## [2.2.2] - 2026-08-05
 
 **The installer now verifies that it actually took effect — fixes the second half of #2 on Arch/CachyOS.**
