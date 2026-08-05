@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.2.3
+Version:        2.2.4
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,15 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.4-1
+- Confirmed working on CachyOS with opencv 5.0.0-7.1 by the original reporter
+- The linker-cache refresh ran without root, so it silently did nothing:
+  ldconfig -p reads the cache unprivileged but plain ldconfig REBUILDS it and
+  needs root. After writing the ld.so.conf.d entry the cache was never
+  refreshed, so the verification read a stale cache and aborted even though the
+  fix was in place — a manual sudo ldconfig plus a re-run was the workaround.
+  Query and refresh are now separate, and refresh elevates.
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.3-1
 - Packaging parity: the .deb builds from any distro now (falls back to ar when
   dpkg-deb is absent), so it can be released from a non-Debian workstation

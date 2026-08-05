@@ -27,12 +27,27 @@
 
 CS9711_LDCONF="/etc/ld.so.conf.d/00-cs9711-local.conf"
 
-# Absolute path so this works from package-manager hooks with a minimal PATH.
-_ldconfig() { PATH="/usr/sbin:/sbin:$PATH" ldconfig "$@"; }
+# Absolute paths so these work from package-manager hooks with a minimal PATH.
+#
+# READ vs REBUILD is the important distinction, and getting it wrong cost
+# @josepcarles a failed first run on CachyOS: `ldconfig -p` reads the cache and
+# works unprivileged, but plain `ldconfig` REBUILDS it and needs root. The first
+# version of this helper rebuilt without sudo and swallowed the resulting
+# permission error, so the cache was never refreshed after the conf file was
+# written — the verification then read a STALE cache, reported failure, and the
+# only way through was a manual `sudo ldconfig` and a second run.
+_ldconfig_query()   { PATH="/usr/sbin:/sbin:$PATH" ldconfig -p 2>/dev/null; }
+_ldconfig_refresh() {
+    if [ "$(id -u)" = 0 ]; then
+        PATH="/usr/sbin:/sbin:$PATH" ldconfig
+    else
+        PATH="/usr/sbin:/sbin:$PATH" sudo ldconfig
+    fi
+}
 
 # Path of the libfprint the dynamic linker actually resolves (empty if none).
 cs9711_resolved_lib() {
-    _ldconfig -p 2>/dev/null | awk '/libfprint-2\.so\.2 /{print $NF; exit}'
+    _ldconfig_query | awk '/libfprint-2\.so\.2 /{print $NF; exit}'
 }
 
 # True when the resolved libfprint is OUR build (carries the cs9711 driver).
@@ -68,7 +83,7 @@ cs9711_install_libdir() {
 # the resolved library is ours by the end, 1 when it still is not.
 cs9711_ensure_link_path() {
     local libdir="$1"
-    _ldconfig 2>/dev/null || true
+    _ldconfig_refresh || return 1
     if cs9711_resolved_is_ours; then
         return 0
     fi
@@ -76,6 +91,8 @@ cs9711_ensure_link_path() {
     printf '# Added by chipsailing-cs9711-fingerprint-linux (issue #2).\n# Puts the patched libfprint ahead of the distro copy on distros that do\n# not carry /usr/local in the default linker path (Arch/CachyOS).\n# Removed by uninstall.sh.\n%s\n' \
         "$libdir" | sudo tee "$CS9711_LDCONF" >/dev/null
     sudo chmod 644 "$CS9711_LDCONF"
-    _ldconfig 2>/dev/null || true
+    # This refresh is the one that matters — without root it silently does
+    # nothing and the check below reads a stale cache.
+    _ldconfig_refresh || return 1
     cs9711_resolved_is_ours
 }

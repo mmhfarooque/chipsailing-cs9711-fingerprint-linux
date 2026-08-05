@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.4] - 2026-08-05
+
+**The Arch fix now works on the first run — confirmed working on CachyOS with OpenCV 5.**
+
+@josepcarles confirmed v2.2.2 gets a CS9711 scanner working again on CachyOS with `opencv 5.0.0-7.1`, which closes out the original report. But his first `reinstall.sh` run failed, and he only got through by running `sudo ldconfig` by hand and trying again. That was a real bug in my fix.
+
+### Fixed
+- **The linker-cache refresh was running without root, so it silently did nothing.** `ldconfig -p` reads the cache and works unprivileged; plain `ldconfig` *rebuilds* it and needs root. The helper called the rebuild without `sudo` and sent the resulting permission error to `/dev/null`, so after writing `/etc/ld.so.conf.d/00-cs9711-local.conf` the cache was never actually rebuilt. The verification then read a **stale** cache, concluded the patched driver still was not being resolved, and aborted — even though the fix was correctly in place. A manual `sudo ldconfig` plus a re-run was the only way past it.
+- The helper now separates the two operations explicitly: an unprivileged query for reading, and a root-elevated refresh for rebuilding, with the failure surfaced rather than swallowed.
+
+If you installed v2.2.2 or v2.2.3 and saw the abort message about the system still resolving `/usr/lib/libfprint-2.so.2`, this is why — and `sudo ldconfig` followed by `./reinstall.sh` was the correct workaround. On v2.2.4 the first run should just work.
+
+---
+
 ## [2.2.3] - 2026-08-05
 
 **Packaging parity: the .deb ships again, the Arch version stops lying, and both packages carry the install verification.**
