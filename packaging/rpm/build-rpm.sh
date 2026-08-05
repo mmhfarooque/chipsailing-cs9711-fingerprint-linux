@@ -19,15 +19,24 @@ echo ""
 echo "=== Building CS9711 RPM package ==="
 echo ""
 
-# Install RPM build tools
-if command -v dnf &>/dev/null; then
-    sudo dnf install -y rpm-build rpmdevtools 2>&1 | tail -3
-elif command -v zypper &>/dev/null; then
-    sudo zypper install -y rpm-build rpmdevtools 2>&1 | tail -3
+# rpmbuild is the only hard requirement. We do NOT auto-install anything:
+# a packaging script that calls sudo cannot run unattended (it just hangs on a
+# password prompt), and rpmdevtools is a convenience, not a dependency.
+if ! command -v rpmbuild >/dev/null 2>&1; then
+    echo "ERROR: rpmbuild not found. Install it first:"
+    echo "  Fedora/RHEL:  sudo dnf install rpm-build"
+    echo "  openSUSE:     sudo zypper install rpm-build"
+    exit 1
 fi
 
-# Set up RPM build tree
-rpmdev-setuptree
+# Set up the RPM build tree. rpmdev-setuptree (rpmdevtools) is nicer but often
+# absent; the tree is just a fixed set of directories, so create them directly
+# when it is missing.
+if command -v rpmdev-setuptree >/dev/null 2>&1; then
+    rpmdev-setuptree
+else
+    mkdir -p "$HOME"/rpmbuild/{SOURCES,SPECS,BUILD,BUILDROOT,RPMS,SRPMS}
+fi
 
 # Create source tarball
 TARBALL_DIR="$HOME/rpmbuild/SOURCES"
@@ -46,7 +55,11 @@ rpmbuild -ba "$HOME/rpmbuild/SPECS/cs9711-fingerprint.spec"
 
 echo ""
 echo "============================================"
-RPM_PATH=$(find "$HOME/rpmbuild/RPMS/" -name "${PKG_NAME}*.rpm" | head -1)
+# Match THIS version's main package. The old glob was ${PKG_NAME}*.rpm piped to
+# head -1, which happily returned a stale build or a -debuginfo/-debugsource
+# subpackage — so the script printed an install command for the wrong file.
+RPM_PATH=$(find "$HOME/rpmbuild/RPMS/" -name "${PKG_NAME}-${VERSION}-*.rpm" \
+    ! -name '*-debuginfo-*' ! -name '*-debugsource-*' | sort | head -1)
 echo "  RPM built: $RPM_PATH"
 echo "============================================"
 echo ""
