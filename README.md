@@ -228,13 +228,17 @@ python3 cs9711-manager.py   # Launch
 Or search **"CS9711"** or **"Fingerprint Manager"** in your app launcher after setup.
 
 The GUI lets you:
-- View scanner status and enrolled fingers
+- See at a glance whether fingerprint is working — scanner, driver and enrolled fingers in one status card
 - Enroll/delete/verify fingerprints with visual progress
 - Adjust retry delay (250ms–3000ms slider)
 - Set PAM max attempts and timeout
-- View which auth locations use fingerprint
+- Turn fingerprint on or off independently for login, lock screen, `sudo` and polkit
 - Rebuild/install/uninstall the driver
 - Configure GNOME Keyring auto-unlock
+
+**Adaptive layout (since v2.2.0).** The window lays out as two columns when there is room — workflow on the left, configuration and upkeep on the right — and collapses to a single vertical column below 880sp. That means it fits a wide desktop window on KDE Plasma, GNOME or Cinnamon, and equally a half-tiled or narrow/mobile-style window, without the endless scrolling of earlier versions. Styling uses no hardcoded colours, so it follows your theme in both light and dark.
+
+If a system update strands the driver, the GUI says so directly — a banner across the top names the missing libraries and offers the rebuild, rather than leaving you to guess at a USB fault.
 
 ![CS9711 Fingerprint Manager](screenshot.png)
 

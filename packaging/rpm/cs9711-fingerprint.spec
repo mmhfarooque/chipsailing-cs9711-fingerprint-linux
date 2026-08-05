@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.1.0
+Version:        2.2.0
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -92,6 +92,18 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.0-1
+- GUI rebuilt as an adaptive two-column dashboard: everything fits on screen
+  instead of a ~1900px single column, and it collapses back to one column
+  below 880sp for narrow/mobile-style windows
+- Status is now a single hero card; scan and authentication settings merged;
+  a driver stranded by a library upgrade is reported in a banner with a
+  Rebuild button rather than a buried subtitle
+- Added an About dialog with developer credit, project and issue links, and
+  the MIT (manager) / LGPL-2.1-or-later (driver) licence note
+- Icon names resolved against the running theme — auth-fingerprint-symbolic
+  does not exist on KDE Breeze and rendered as a broken-image glyph
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.1.0-1
 - Survive a distro OpenCV major upgrade (issue #2): sigfm now resolves OpenCV as
   opencv4 -> opencv5 -> opencv (pkg-config) -> CMake OpenCV, so an OpenCV 4 -> 5

@@ -7,6 +7,30 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.0] - 2026-08-05
+
+**GUI rebuilt as an adaptive two-column dashboard — no more endless scrolling.**
+
+### Changed
+- **The window is no longer one tall column.** Seven stacked groups ran to roughly 1900px, so Maintenance and Diagnostics sat below the fold on most screens. The layout is now two columns: the left carries the workflow (status → enrol → scanner/authentication tuning), the right carries configuration and upkeep (where fingerprint applies → maintenance → diagnostics). Everything fits on screen at once at 1120×720.
+- **Adaptive, not merely wide.** An `Adw.Breakpoint` collapses the two columns back into a single vertical column below 880sp, so the app stays correct in a narrow/mobile GNOME context, a half-tiled window, or on a small laptop screen. Verified programmatically: horizontal at 1200sp, vertical at 600sp.
+- **Status is a hero card**, not three stacked rows. One headline answers whether fingerprint works right now, with Scanner / Driver / Fingers as colour-coded chips beneath it — ~120px instead of ~200px, and the three facts are only ever read together anyway.
+- **Scan Settings and Authentication Settings merged** into a single group. Two headings and two descriptions for four controls that all answer the same question (how hard should it try before giving up).
+- **A broken driver is now an `Adw.Banner`** across the top of the window with a Rebuild button, instead of a subtitle buried mid-page.
+
+### Added
+- **About dialog** (header bar) with developer credit, contact, GitHub profile, project and issue links, upstream driver link, and the correct dual-licence note — MIT for this manager and installer, LGPL-2.1-or-later for the patched libfprint driver.
+
+### Fixed
+- **Icon names are resolved against the running icon theme.** `auth-fingerprint-symbolic` is an Adwaita name that KDE Breeze does not ship, so it rendered as the broken-image glyph — the same portability trap already documented for the `.desktop` file. A fallback chain now picks the first name the theme actually has.
+- A bare ampersand in a `PreferencesGroup` title raised a Pango markup error and blanked the heading (those titles are parsed as markup).
+
+### Notes
+- Styling uses only alpha-over-currentColor, no hardcoded colours, so it reads correctly under Adwaita, Breeze, Cinnamon and XFCE in both light and dark variants.
+- No change to the driver, installer, PAM model or packaging — this release is the GUI only.
+
+---
+
 ## [2.1.0] - 2026-08-05
 
 **OpenCV-upgrade resilience + Arch/CachyOS PAM apply — fixes #1 and #2.**

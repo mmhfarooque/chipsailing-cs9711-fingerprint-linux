@@ -20,9 +20,13 @@ import time
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 APP_ID = "com.github.mmhfarooque.cs9711-manager"
+APP_AUTHOR = "Mahmud Farooque"
+APP_AUTHOR_EMAIL = "farooque7@gmail.com"
+AUTHOR_URL = "https://github.com/mmhfarooque"
+PROJECT_URL = "https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux"
 USB_ID = "2541:0236"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DRIVER_DIR = os.path.join(SCRIPT_DIR, "libfprint-CS9711")
@@ -139,6 +143,85 @@ FINGERS = [
 ]
 
 FINGER_NAMES = {fid: fname for fid, fname in FINGERS}
+
+# ============================================================================
+# Styling
+# ============================================================================
+# Deliberately theme-agnostic: no hardcoded colours, only alpha over
+# currentColor, so the same sheet reads correctly under GNOME's Adwaita, KDE
+# Plasma's Breeze, Cinnamon, XFCE and in both light and dark variants.
+_CSS = b"""
+.cs-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: alpha(currentColor, .10);
+}
+.cs-hero {
+  padding: 6px 2px;
+}
+.cs-hero-icon {
+  min-width: 52px;
+  min-height: 52px;
+}
+"""
+
+
+def install_css():
+    """Attach the stylesheet once per display."""
+    display = Gdk.Display.get_default()
+    if display is None or getattr(install_css, "_done", False):
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_data(_CSS)
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    install_css._done = True
+
+
+def pick_icon(*names):
+    """First icon name that the running icon theme actually has.
+
+    Symbolic names are NOT portable: `auth-fingerprint-symbolic` exists in
+    Adwaita but not in KDE Breeze, where it renders as the broken-image glyph
+    (the same trap documented in cs9711-manager.desktop). Callers pass a
+    preference list ending in something universally present.
+    """
+    display = Gdk.Display.get_default()
+    if display is not None:
+        theme = Gtk.IconTheme.get_for_display(display)
+        for n in names:
+            if theme.has_icon(n):
+                return n
+    return names[-1]
+
+
+# Resolved once: the app's own identity icon, and the state icons.
+def icon_fingerprint():
+    return pick_icon("auth-fingerprint-symbolic", "fingerprint-symbolic",
+                     "fingerprint", "dialog-password-symbolic", "dialog-password")
+
+
+def icon_warning():
+    return pick_icon("dialog-warning-symbolic", "dialog-warning")
+
+
+def status_pill(label):
+    """Small rounded status chip. Colour is carried by a libadwaita style
+    class (.success/.warning/.error/.dim-label) set at refresh time."""
+    lbl = Gtk.Label(label=label, css_classes=["cs-pill", "caption", "dim-label"])
+    lbl.set_valign(Gtk.Align.CENTER)
+    return lbl
+
+
+def set_pill(lbl, text, level):
+    """level: ok | warn | bad | idle"""
+    lbl.set_label(text)
+    for c in ("success", "warning", "error", "dim-label"):
+        lbl.remove_css_class(c)
+    lbl.add_css_class(
+        {"ok": "success", "warn": "warning", "bad": "error"}.get(level, "dim-label")
+    )
 
 
 # ============================================================================
@@ -440,11 +523,16 @@ class CS9711Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_title(f"CS9711 Fingerprint Manager v{APP_VERSION}")
-        self.set_default_size(680, 780)
+        # Wide enough for the two-column layout; the breakpoint below collapses
+        # to a single column when the window (or the screen) is narrower.
+        self.set_default_size(1120, 720)
+        self.set_size_request(360, 480)
 
         # Enroll process tracking
         self._enroll_process = None
         self._enroll_cancel = False
+
+        install_css()
 
         # Main layout
         self.toolbar_view = Adw.ToolbarView()
@@ -455,27 +543,70 @@ class CS9711Window(Adw.ApplicationWindow):
         refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh status")
         refresh_btn.connect("clicked", lambda _: self.refresh_all())
         header.pack_end(refresh_btn)
+
+        # About — author credit and project links. Standard for a desktop app
+        # (every GNOME/KDE app carries one) and where users expect to find the
+        # issue tracker.
+        about_btn = Gtk.Button(icon_name=pick_icon("help-about-symbolic", "help-about"),
+                               tooltip_text="About this app")
+        about_btn.connect("clicked", self.on_about)
+        header.pack_end(about_btn)
         self.toolbar_view.add_top_bar(header)
 
-        # Scrollable content
-        scroll = Gtk.ScrolledWindow(vexpand=True)
+        # Driver-health banner. A driver stranded by an OpenCV upgrade used to
+        # be a subtitle halfway down the page; as a banner it is unmissable and
+        # carries the fix as a button.
+        self.health_banner = Adw.Banner(revealed=False, button_label="Rebuild Driver")
+        self.health_banner.connect(
+            "button-clicked", lambda *_: self.on_rebuild_driver(self._maintenance_rebuild_btn)
+        )
+        self.toolbar_view.add_top_bar(self.health_banner)
+
+        # Scrollable content. Horizontal scrolling is off: the breakpoint
+        # guarantees the content reflows instead of overflowing sideways.
+        scroll = Gtk.ScrolledWindow(vexpand=True,
+                                    hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.toolbar_view.set_content(scroll)
 
-        # Main box
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        main_box.set_margin_start(16)
-        main_box.set_margin_end(16)
-        main_box.set_margin_top(8)
-        main_box.set_margin_bottom(16)
-        scroll.set_child(main_box)
+        # Clamp keeps the dashboard readable on ultrawide screens rather than
+        # stretching two columns across 3840px.
+        clamp = Adw.Clamp(maximum_size=1500, tightening_threshold=1100)
+        scroll.set_child(clamp)
 
-        # Build all sections
-        self.build_status_section(main_box)
-        self.build_enrollment_section(main_box)
-        self.build_scan_settings_section(main_box)
-        self.build_pam_settings_section(main_box)
-        self.build_auth_section(main_box)
-        self.build_maintenance_section(main_box)
+        self.columns = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=18,
+            margin_start=16, margin_end=16, margin_top=10, margin_bottom=20,
+        )
+        clamp.set_child(self.columns)
+
+        self.col_left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
+                                hexpand=True, valign=Gtk.Align.START)
+        self.col_right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
+                                 hexpand=True, valign=Gtk.Align.START)
+        self.columns.append(self.col_left)
+        self.columns.append(self.col_right)
+
+        # Left column is the workflow you came for: does it work → enrol a
+        # finger → tune how hard it tries. Right column is configuration and
+        # upkeep: where it applies → maintenance → diagnostics, i.e. importance
+        # decreasing toward the bottom-right.
+        #
+        # The split is also chosen so the two columns finish at roughly the same
+        # height. Putting all four config groups on the right left the bottom
+        # half of the left column empty, which looks broken rather than airy.
+        self.build_status_section(self.col_left)
+        self.build_enrollment_section(self.col_left)
+        self.build_settings_section(self.col_left)
+        self.build_auth_section(self.col_right)
+        self.build_maintenance_section(self.col_right)
+
+        # Below this width two columns stop being readable — stack them. This is
+        # what keeps the app correct in a narrow/mobile GNOME context, in a
+        # half-tiled window, and on small laptop screens, without giving up the
+        # dashboard when there IS room for it.
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 880sp"))
+        bp.add_setter(self.columns, "orientation", Gtk.Orientation.VERTICAL)
+        self.add_breakpoint(bp)
 
         # Toast overlay for notifications
         self.toast_overlay = Adw.ToastOverlay()
@@ -525,20 +656,47 @@ class CS9711Window(Adw.ApplicationWindow):
     # ========================================================================
 
     def build_status_section(self, parent):
-        group = Adw.PreferencesGroup(title="Status")
+        """Hero card: one glance answers whether fingerprint works right now.
+
+        This replaces three stacked rows (scanner / driver / fingers) that cost
+        ~200px to say what a headline plus three chips now says in ~120px —
+        and says it better, because the three facts are only ever read together.
+        """
+        group = Adw.PreferencesGroup()
         parent.append(group)
 
-        self.status_scanner = Adw.ActionRow(title="Scanner", subtitle="Checking...")
-        self.status_scanner.add_prefix(Gtk.Image.new_from_icon_name("drive-removable-media-symbolic"))
-        group.add(self.status_scanner)
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                       css_classes=["card", "cs-hero"])
+        group.add(card)
 
-        self.status_driver = Adw.ActionRow(title="Driver", subtitle="Checking...")
-        self.status_driver.add_prefix(Gtk.Image.new_from_icon_name("emblem-system-symbolic"))
-        group.add(self.status_driver)
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16, hexpand=True,
+                        margin_top=16, margin_bottom=16, margin_start=16, margin_end=16)
+        card.append(inner)
 
-        self.status_fingers = Adw.ActionRow(title="Enrolled Fingers", subtitle="Checking...")
-        self.status_fingers.add_prefix(Gtk.Image.new_from_icon_name("contact-new-symbolic"))
-        group.add(self.status_fingers)
+        self.hero_icon = Gtk.Image.new_from_icon_name(icon_fingerprint())
+        self.hero_icon.set_pixel_size(48)
+        self.hero_icon.add_css_class("cs-hero-icon")
+        self.hero_icon.set_valign(Gtk.Align.CENTER)
+        inner.append(self.hero_icon)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3,
+                       valign=Gtk.Align.CENTER, hexpand=True)
+        inner.append(text)
+
+        self.hero_title = Gtk.Label(xalign=0, label="Checking…", css_classes=["title-2"])
+        self.hero_title.set_wrap(True)
+        text.append(self.hero_title)
+
+        self.hero_sub = Gtk.Label(xalign=0, label="", css_classes=["dim-label"], wrap=True)
+        text.append(self.hero_sub)
+
+        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_top=8)
+        text.append(chips)
+        self.pill_scanner = status_pill("Scanner")
+        self.pill_driver = status_pill("Driver")
+        self.pill_fingers = status_pill("Fingers")
+        for p in (self.pill_scanner, self.pill_driver, self.pill_fingers):
+            chips.append(p)
 
     # ========================================================================
     # Enrollment Section
@@ -881,10 +1039,19 @@ class CS9711Window(Adw.ApplicationWindow):
     # Scan Settings Section
     # ========================================================================
 
-    def build_scan_settings_section(self, parent):
+    def build_settings_section(self, parent):
+        """Scanner pacing and authentication limits in ONE group.
+
+        They were two groups with two headings and two descriptions for four
+        controls that are all answers to the same question — how hard should it
+        try before giving up. Merging them removes a heading, a description and
+        a group gap without hiding anything.
+        """
         group = Adw.PreferencesGroup(
-            title="Scan Settings",
-            description="Controls how the scanner behaves between retries",
+            # NB: PreferencesGroup titles are parsed as Pango markup — a bare
+            # ampersand here raises a markup error and blanks the heading.
+            title="Scanner and Authentication",
+            description="How the scanner paces retries, and how many tries before password",
         )
         parent.append(group)
 
@@ -931,6 +1098,9 @@ class CS9711Window(Adw.ApplicationWindow):
         # Track changes
         self._original_delay = 1500
         self.delay_adj.connect("value-changed", self._on_delay_changed)
+
+        # --- authentication limits, same group ---
+        self.build_pam_settings_section(group)
 
     def _on_delay_changed(self, adj):
         current = int(adj.get_value())
@@ -979,13 +1149,8 @@ class CS9711Window(Adw.ApplicationWindow):
     # PAM Settings Section
     # ========================================================================
 
-    def build_pam_settings_section(self, parent):
-        group = Adw.PreferencesGroup(
-            title="Authentication Settings",
-            description="How many fingerprint attempts before falling back to password",
-        )
-        parent.append(group)
-
+    def build_pam_settings_section(self, group):
+        """Rows only — the caller owns the group (see build_settings_section)."""
         # Max tries
         self.tries_adj = Gtk.Adjustment(value=7, lower=1, upper=15, step_increment=1)
         self.tries_row = Adw.SpinRow(
@@ -1527,6 +1692,46 @@ true''')
         # Fallback: tell user to run manually
         self.show_toast("No terminal found — run manually: python3 helpers/set-empty-keyring-password.py")
 
+    def on_about(self, btn):
+        """Author credit, project links and licence.
+
+        Adw.AboutDialog is libadwaita 1.5+; AboutWindow is the 1.2 equivalent
+        and is used as the fallback so the button still works on older
+        distributions rather than raising.
+        """
+        fields = dict(
+            application_name="CS9711 Fingerprint Manager",
+            application_icon=APP_ID,
+            version=APP_VERSION,
+            developer_name=APP_AUTHOR,
+            # libadwaita renders "Name <mail>" as a mailto link in the credits
+            developers=[f"{APP_AUTHOR} <{APP_AUTHOR_EMAIL}>"],
+            license_type=Gtk.License.MIT_X11,
+            website=PROJECT_URL,
+            issue_url=f"{PROJECT_URL}/issues",
+            copyright=f"© 2026 {APP_AUTHOR}",
+            comments=(
+                "Driver installer and manager for the Chipsailing CS9711 "
+                "fingerprint scanner (USB 2541:0236) on Linux.\n\n"
+                "This manager and the installer scripts are MIT licensed. The "
+                "patched libfprint driver it builds is LGPL-2.1-or-later, from "
+                "the archeYR/libfprint-CS9711 community fork."
+            ),
+        )
+        def links(d):
+            d.add_link("Developer on GitHub", AUTHOR_URL)
+            d.add_link("Report an issue", f"{PROJECT_URL}/issues")
+            d.add_link("Upstream driver", "https://github.com/archeYR/libfprint-CS9711")
+
+        if hasattr(Adw, "AboutDialog"):
+            dlg = Adw.AboutDialog(**fields)
+            links(dlg)
+            dlg.present(self)
+        else:
+            dlg = Adw.AboutWindow(transient_for=self, **fields)
+            links(dlg)
+            dlg.present()
+
     def on_view_log(self, btn):
         log.info("User opened log viewer")
         try:
@@ -1627,26 +1832,79 @@ true''')
         threading.Thread(target=do_refresh, daemon=True).start()
 
     def _apply_refresh(self, scanner, driver, health, fingers, delay, max_tries, timeout, auth_locs):
-        # Status
-        self.status_scanner.set_subtitle(
-            "Connected (USB 2541:0236)" if scanner else "Not detected — check USB"
-        )
-        if driver:
-            self.status_driver.set_subtitle("Installed and working")
-        elif health[0] == "broken":
+        friendly_fingers = [FINGER_NAMES.get(f, f) for f in fingers]
+        broken = (not driver) and health[0] == "broken"
+
+        # ---- hero card: headline states the ONE thing that matters ----
+        # Icon names go through the theme probe — hardcoding Adwaita's
+        # auth-fingerprint-symbolic here renders a broken-image glyph on KDE
+        # Breeze, which ships fingerprint-symbolic instead.
+        ok_icon, warn_icon = icon_fingerprint(), icon_warning()
+        if broken:
             # A system library the driver links against was upgraded away
             # (usually an OpenCV 4 -> 5 bump). Rebuilding relinks against the
             # new version — do NOT chase USB/cable ghosts in this state.
-            self.status_driver.set_subtitle(
-                f"BROKEN — missing {health[1]} (system OpenCV upgrade?) — "
-                "use Maintenance > Rebuild Driver"
+            title, sub, icon = (
+                "Driver needs rebuilding",
+                f"Missing {health[1]} — a system library the driver was built "
+                "against was upgraded. Rebuild to relink against the new one.",
+                warn_icon,
+            )
+        elif not scanner:
+            title, sub, icon = (
+                "Scanner not detected",
+                "Check the USB connection. If it plugs into a keyboard hub, the "
+                "keyboard must be connected by cable, not wirelessly.",
+                warn_icon,
+            )
+        elif not driver:
+            title, sub, icon = (
+                "Driver not installed",
+                "Run install.sh, or use Rebuild Driver below if it was working before.",
+                warn_icon,
+            )
+        elif not fingers:
+            title, sub, icon = (
+                "Ready to set up",
+                "Scanner and driver are working — enrol a finger to start using it.",
+                ok_icon,
             )
         else:
-            self.status_driver.set_subtitle("Not installed or scanner not detected")
-        friendly_fingers = [FINGER_NAMES.get(f, f) for f in fingers]
-        self.status_fingers.set_subtitle(
-            ", ".join(friendly_fingers) if fingers else "None enrolled"
+            enabled = [n for n, on in auth_locs.items() if on]
+            title = "Fingerprint is ready"
+            sub = (
+                f"Active for {', '.join(enabled)}."
+                if enabled
+                else "Enrolled, but not switched on anywhere yet — see Where to Use Fingerprint."
+            )
+            icon = ok_icon
+
+        self.hero_title.set_label(title)
+        self.hero_sub.set_label(sub)
+        self.hero_icon.set_from_icon_name(icon)
+        for c in ("success", "warning", "error"):
+            self.hero_icon.remove_css_class(c)
+        self.hero_icon.add_css_class(
+            "error" if broken or not scanner else ("warning" if not driver or not fingers else "success")
         )
+
+        set_pill(self.pill_scanner, "Scanner ✓" if scanner else "Scanner ✕",
+                 "ok" if scanner else "bad")
+        set_pill(self.pill_driver,
+                 "Driver ✓" if driver else ("Driver broken" if broken else "Driver ✕"),
+                 "ok" if driver else "bad")
+        set_pill(self.pill_fingers,
+                 f"{len(fingers)} finger(s)" if fingers else "No fingers",
+                 "ok" if fingers else "idle")
+
+        # Banner carries the actionable failure to the top of the window
+        if broken:
+            self.health_banner.set_title(
+                f"Driver cannot load — missing {health[1]} (system OpenCV upgrade?)"
+            )
+            self.health_banner.set_revealed(True)
+        else:
+            self.health_banner.set_revealed(False)
 
         # Enrollment status banner + button label
         if fingers:
