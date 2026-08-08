@@ -190,9 +190,26 @@ _hvf(){ local s="$1" depth="$2" f t
   done
   return 1; }
 ensure_copy(){ [ -f "$ETC/$1" ] || { [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }; }
+# Insertion point matters for safety, not just for tidiness. Our line is
+# 'sufficient', so anything ABOVE it still runs and anything below is skipped
+# on a successful touch. It must therefore land AFTER the stack's required /
+# requisite pre-checks (pam_securetty, pam_nologin) and immediately BEFORE the
+# include of the common stack that does the password work.
+# The old code anchored on the literal string common-auth and otherwise fell
+# back to line 1 — which on Arch put fingerprint ahead of pam_nologin, letting
+# a touch bypass a login lockout (measured on /etc/pam.d/greetd, 2026-08-08).
+# Anchors handled: auth include/substack <common stack> (openSUSE, Fedora,
+# Arch) and Debian/Ubuntu's @include common-auth.
 add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" && return 0
-  awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {print ins; d=1} {print} END{if(!d)exit 3}' "$ETC/$1" > "$ETC/$1.tmp" \
-    || awk -v ins="$INS" 'NR==1{print; print ins; next}{print}' "$ETC/$1" > "$ETC/$1.tmp"
+  awk -v ins="$INS" '
+    { lines[NR]=$0
+      if (!anchor && (($1=="@include" && $2 ~ /auth/) ||
+                      ($1=="auth" && ($2=="include" || $2=="substack")))) anchor=NR
+      if ($1=="auth" && ($2=="required" || $2=="requisite")) lastreq=NR }
+    END{ if (anchor) pos=anchor-1; else if (lastreq) pos=lastreq;
+         else pos=(lines[1] ~ /^#/) ? 1 : 0
+         for (i=1;i<=NR;i++) { if (i==pos+1) print ins; print lines[i] }
+         if (pos>=NR) print ins }' "$ETC/$1" > "$ETC/$1.tmp" || return 0
   mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }
 # Enable a location: if a native fingerprint service exists (vendor ships fprintd,
 # e.g. kde-fingerprint/gdm-fingerprint) it's already on; otherwise add our line to
