@@ -169,7 +169,12 @@ configure_pam() {
 set -u
 ETC=/etc/pam.d; VENDOR=/usr/lib/pam.d; MARK="# cs9711-managed"
 INS="auth\tsufficient\tpam_fprintd.so\tmax-tries=7 timeout=30\t$MARK"
-has_vendor_fp(){ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\.so' "$VENDOR/$1"; }
+# Native = a distro-shipped fprintd line (not one of ours — those carry MARK).
+# Fedora ships kde-fingerprint in /etc/pam.d rather than /usr/lib/pam.d, so
+# both directories count (measured on Fedora 44 KDE, 2026-08-08).
+has_vendor_fp(){ local d f; for d in "$VENDOR" "$ETC"; do f="$d/$1"
+  [ -f "$f" ] && grep -qE '^[^#]*pam_fprintd\.so' "$f" && ! grep -q "$MARK" "$f" && return 0
+done; return 1; }
 ensure_copy(){ [ -f "$ETC/$1" ] || { [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }; }
 add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" && return 0
   awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {print ins; d=1} {print} END{if(!d)exit 3}' "$ETC/$1" > "$ETC/$1.tmp" \
@@ -181,6 +186,22 @@ add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/
 enable_loc(){ local native='' s; for s in "$@"; do has_vendor_fp "$s" && native=x; done
   [ -n "$native" ] && return 0
   for s in "$@"; do [ -f "$ETC/$s" ] || [ -f "$VENDOR/$s" ] || continue; add_fp "$s"; done; }
+# plasmalogin (Plasma 6.7+ replaced sddm; seen on Fedora 44 KDE) has no
+# common-auth anchor and starts with pam_selinux_permit, which must stay
+# first. Insertion recipe verified by @popy2k14 on Fedora 44 (#1): typed
+# password authenticates instantly via pam_unix, empty/failed password
+# falls through to fingerprint — plasmalogin has no parallel prompt yet.
+add_fp_plasmalogin(){ ensure_copy plasmalogin; local f="$ETC/plasmalogin"
+  [ -f "$f" ] || return 0; grep -q "$MARK" "$f" && return 0
+  has_vendor_fp plasmalogin && return 0
+  awk -v m="$MARK" '{print}
+    !d && /^[^#]*pam_selinux_permit\.so/ {
+      print "auth\tsufficient\tpam_unix.so\ttry_first_pass likeauth nullok\t" m
+      print "auth\tsufficient\tpam_fprintd.so\tmax-tries=5 timeout=10\t" m
+      d=1 }
+    END{if(!d) exit 3}' "$f" > "$f.tmp" || { rm -f "$f.tmp"; return 0; }
+  mv "$f.tmp" "$f"; chmod 644 "$f"; }
+add_fp_plasmalogin
 enable_loc sddm gdm-fingerprint gdm-password lightdm lxdm
 enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-password cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
 enable_loc sudo sudo-i
@@ -189,9 +210,13 @@ enable_loc polkit-1 polkit-1-kde-1
 for cf in common-auth common-auth-pc; do
   [ -f "$ETC/$cf" ] && grep -q pam_fprintd "$ETC/$cf" && sed -i '/pam_fprintd/d' "$ETC/$cf"
 done
+# The loop above legitimately ends nonzero on distros without common-auth
+# (Fedora/Arch) — that must not become this script's exit status.
+exit 0
 PAMEOF
 
-    sudo bash "$tmp"; local rc=$?
+    # set -e-safe capture: a bare `sudo bash; rc=$?` dies before the capture
+    local rc=0; sudo bash "$tmp" || rc=$?
     rm -f "$tmp"
     if [ "$rc" -eq 0 ]; then
         ok "Fingerprint enabled per-service — toggle any location in the GUI ('Where to Use Fingerprint')"
