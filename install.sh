@@ -169,12 +169,26 @@ configure_pam() {
 set -u
 ETC=/etc/pam.d; VENDOR=/usr/lib/pam.d; MARK="# cs9711-managed"
 INS="auth\tsufficient\tpam_fprintd.so\tmax-tries=7 timeout=30\t$MARK"
-# Native = a distro-shipped fprintd line (not one of ours — those carry MARK).
-# Fedora ships kde-fingerprint in /etc/pam.d rather than /usr/lib/pam.d, so
-# both directories count (measured on Fedora 44 KDE, 2026-08-08).
-has_vendor_fp(){ local d f; for d in "$VENDOR" "$ETC"; do f="$d/$1"
-  [ -f "$f" ] && grep -qE '^[^#]*pam_fprintd\.so' "$f" && ! grep -q "$MARK" "$f" && return 0
-done; return 1; }
+# Native = a distro-shipped fprintd line (not one of ours — those carry MARK),
+# reachable from the service's own stack INCLUDING include/substack targets.
+# Two measurements on Fedora 44 forced this (2026-08-08):
+#   * kde-fingerprint lives in /etc/pam.d, not /usr/lib/pam.d — so both dirs count.
+#   * fingerprint support arrives through includes, never a direct line:
+#     gdm-fingerprint -> fingerprint-auth, and sudo/polkit-1 -> system-auth
+#     (authselect's with-fingerprint feature, on by default on Fedora KDE).
+# A flat grep sees none of that, calls the location unconfigured, and injects
+# duplicates — or, far worse, injects into gdm-password (see enable_loc below).
+has_vendor_fp(){ _hvf "$1" 0; }
+_hvf(){ local s="$1" depth="$2" f t
+  [ "$depth" -ge 3 ] && return 1
+  for f in "$ETC/$s" "$VENDOR/$s"; do
+    [ -f "$f" ] || continue
+    grep -E '^[^#]*pam_fprintd\.so' "$f" 2>/dev/null | grep -qv "$MARK" && return 0
+    for t in $(awk '$1=="auth" && ($2=="include"||$2=="substack"){print $3}' "$f"); do
+      _hvf "$t" $((depth+1)) && return 0
+    done
+  done
+  return 1; }
 ensure_copy(){ [ -f "$ETC/$1" ] || { [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }; }
 add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" && return 0
   awk -v ins="$INS" '!d && $1=="auth" && /common-auth/ {print ins; d=1} {print} END{if(!d)exit 3}' "$ETC/$1" > "$ETC/$1.tmp" \
@@ -202,8 +216,15 @@ add_fp_plasmalogin(){ ensure_copy plasmalogin; local f="$ETC/plasmalogin"
     END{if(!d) exit 3}' "$f" > "$f.tmp" || { rm -f "$f.tmp"; return 0; }
   mv "$f.tmp" "$f"; chmod 644 "$f"; }
 add_fp_plasmalogin
-enable_loc sddm gdm-fingerprint gdm-password lightdm lxdm
-enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-password cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+# gdm-password is deliberately NOT in either list. It carries the keyring
+# capture (pam_gnome_keyring auth), and a 'sufficient' fprintd line ahead of
+# that short-circuits the stack on a successful touch, so the keyring never
+# gets the password and every saved credential looks lost — the GNOME twin of
+# the KWallet/pam_kwallet5 breakage this project hit on openSUSE. GNOME's own
+# fingerprint path is gdm-fingerprint, for both the login screen and the
+# unlock dialog, so nothing is lost by leaving gdm-password alone.
+enable_loc sddm gdm-fingerprint lightdm lxdm
+enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
 enable_loc sudo sudo-i
 enable_loc polkit-1 polkit-1-kde-1
 # Per-service files are authoritative: drop any global fprintd from the common stack.
