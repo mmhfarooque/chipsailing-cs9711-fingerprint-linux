@@ -210,7 +210,20 @@ add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/
          else pos=(lines[1] ~ /^#/) ? 1 : 0
          for (i=1;i<=NR;i++) { if (i==pos+1) print ins; print lines[i] }
          if (pos>=NR) print ins }' "$ETC/$1" > "$ETC/$1.tmp" || return 0
-  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }
+  mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"
+  # A 'sufficient' line short-circuits everything below it, including the
+  # module that captures the password to unlock the login keyring or wallet.
+  # That is how fingerprint login made a machine look like every saved
+  # credential had vanished (KWallet on openSUSE; the same trap on GNOME's
+  # gdm-password, which is why that stack is left alone entirely). Where a
+  # dedicated fingerprint service exists we never get here — but plasmalogin
+  # has none yet, so say so out loud rather than let it surprise someone.
+  if grep -qE 'pam_(kwallet|gnome_keyring)' "$ETC/$1" 2>/dev/null; then
+    echo "  NOTE: $1 also unlocks a keyring/wallet. Fingerprint login skips" >&2
+    echo "        that step, so saved passwords may need unlocking by hand." >&2
+    echo "        Fix: KDE -> github.com/Himalian/autokdewallet, GNOME -> an" >&2
+    echo "        empty keyring password (helpers/set-empty-keyring-password.py)." >&2
+  fi; }
 # Enable a location: if a native fingerprint service exists (vendor ships fprintd,
 # e.g. kde-fingerprint/gdm-fingerprint) it's already on; otherwise add our line to
 # every existing generic service file for that location.
@@ -240,13 +253,29 @@ add_fp_plasmalogin
 # the KWallet/pam_kwallet5 breakage this project hit on openSUSE. GNOME's own
 # fingerprint path is gdm-fingerprint, for both the login screen and the
 # unlock dialog, so nothing is lost by leaving gdm-password alone.
-# greetd is the login stack for COSMIC (cosmic-greeter), and for tuigreet /
-# regreet on minimal Wayland setups — none of which existed in this list, so
-# fingerprint login was silently never configured on any of them. Measured on
-# Arch + COSMIC 1.5.0, 2026-08-08: /etc/pam.d/greetd includes
-# system-local-login, carries no fingerprint of its own, and ships no
-# cosmic-greeter service file at all.
-enable_loc sddm gdm-fingerprint lightdm lxdm greetd
+# greetd-based logins (COSMIC's cosmic-greeter, tuigreet, regreet) name the
+# PAM service they authenticate users with in their own config, and it is NOT
+# always 'greetd': COSMIC 1.5.0 on Arch ships
+# /etc/greetd/cosmic-greeter.toml with [general] service = "login", so a line
+# added to /etc/pam.d/greetd would never be consulted (measured 2026-08-08).
+# Read the config instead of guessing, and only when a greetd-family greeter
+# is actually the display manager — otherwise a stray /etc/greetd would make
+# us edit the console login stack on a machine that never uses it.
+greetd_auth_service(){
+  readlink -f /etc/systemd/system/display-manager.service 2>/dev/null \
+    | grep -qE 'greetd|cosmic-greeter' || return 1
+  local f s
+  for f in /etc/greetd/*.toml; do
+    [ -f "$f" ] || continue
+    s=$(awk -F= '/^[[:space:]]*\[/{sec=$0}
+                 sec ~ /\[general\]/ && /^[[:space:]]*service[[:space:]]*=/{
+                   gsub(/[" \t]/,"",$2); print $2; exit}' "$f")
+    [ -n "$s" ] && { printf '%s\n' "$s"; return 0; }
+  done
+  return 1
+}
+GREETD_SVC=$(greetd_auth_service || true)
+enable_loc sddm gdm-fingerprint lightdm lxdm greetd ${GREETD_SVC:-}
 enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
 enable_loc sudo sudo-i
 enable_loc polkit-1 polkit-1-kde-1
