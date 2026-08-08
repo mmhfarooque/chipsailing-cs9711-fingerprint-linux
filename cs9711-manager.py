@@ -7,6 +7,7 @@ driver maintenance. Uses GTK4 + libadwaita for native GNOME look.
 """
 
 import gi
+import glob
 import logging
 import os
 import re
@@ -251,9 +252,26 @@ def run_cmd(cmd, timeout=10):
 
 
 def is_scanner_connected():
+    # sysfs first: Arch and other minimal installs have no usbutils, so lsusb
+    # is absent and its failure looked exactly like an unplugged scanner.
+    vendor, product = USB_ID.split(":")
+    try:
+        for path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                with open(path) as fh:
+                    if fh.read().strip() != vendor:
+                        continue
+                with open(path.replace("idVendor", "idProduct")) as fh:
+                    if fh.read().strip() == product:
+                        log.debug("Scanner connected: True (sysfs)")
+                        return True
+            except OSError:
+                continue
+    except Exception as exc:  # never let detection crash the GUI
+        log.debug(f"sysfs scan failed: {exc}")
     rc, out, _ = run_cmd(["lsusb"])
     connected = USB_ID in out if rc == 0 else False
-    log.debug(f"Scanner connected: {connected}")
+    log.debug(f"Scanner connected: {connected} (lsusb fallback)")
     return connected
 
 

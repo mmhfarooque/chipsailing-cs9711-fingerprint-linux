@@ -223,7 +223,13 @@ add_fp_plasmalogin
 # the KWallet/pam_kwallet5 breakage this project hit on openSUSE. GNOME's own
 # fingerprint path is gdm-fingerprint, for both the login screen and the
 # unlock dialog, so nothing is lost by leaving gdm-password alone.
-enable_loc sddm gdm-fingerprint lightdm lxdm
+# greetd is the login stack for COSMIC (cosmic-greeter), and for tuigreet /
+# regreet on minimal Wayland setups — none of which existed in this list, so
+# fingerprint login was silently never configured on any of them. Measured on
+# Arch + COSMIC 1.5.0, 2026-08-08: /etc/pam.d/greetd includes
+# system-local-login, carries no fingerprint of its own, and ships no
+# cosmic-greeter service file at all.
+enable_loc sddm gdm-fingerprint lightdm lxdm greetd
 enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
 enable_loc sudo sudo-i
 enable_loc polkit-1 polkit-1-kde-1
@@ -273,7 +279,22 @@ ok "Detected: $DISTRO_NAME (package manager: $PKG_FAMILY)"
 get_lib_path
 ok "Architecture: $(uname -m)"
 
-if lsusb | grep -q "2541:0236"; then
+# Scanner detection reads sysfs, NOT lsusb. Arch (and other minimal installs)
+# do not ship usbutils, so `lsusb` is simply absent — and because this check
+# runs BEFORE dependencies are installed, it could never fix itself: the
+# scanner was plugged in, sysfs listed it, and the installer aborted saying it
+# was not there. Measured on a stock Arch VM, 2026-08-08. sysfs is always
+# present on Linux; lsusb stays only as a fallback.
+cs9711_on_usb() {
+    local f
+    for f in /sys/bus/usb/devices/*/idVendor; do
+        [ -r "$f" ] || continue
+        [ "$(cat "$f" 2>/dev/null)" = "2541" ] || continue
+        [ "$(cat "${f%idVendor}idProduct" 2>/dev/null)" = "0236" ] && return 0
+    done
+    command -v lsusb >/dev/null 2>&1 && lsusb 2>/dev/null | grep -q "2541:0236"
+}
+if cs9711_on_usb; then
     ok "CS9711 scanner detected on USB"
 else
     warn "CS9711 scanner NOT detected on USB"
