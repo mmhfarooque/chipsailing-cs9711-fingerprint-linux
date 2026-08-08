@@ -46,6 +46,15 @@ tar czf "$TARBALL_DIR/${PKG_NAME}-${VERSION}.tar.gz" \
     --transform="s/^chipsailing-cs9711-fingerprint-linux/${PKG_NAME}-${VERSION}/" \
     chipsailing-cs9711-fingerprint-linux/
 
+# Sync the spec's Version to the VERSION file before building — the spec has
+# drifted twice before (v2.0.1, v2.1.0) when this was left to manual edits.
+# Same pattern as build-arch.sh syncing PKGBUILD's pkgver.
+SPEC_VERSION=$(grep -E '^Version:' "$SCRIPT_DIR/cs9711-fingerprint.spec" | awk '{print $2}')
+if [ "$SPEC_VERSION" != "$VERSION" ]; then
+    echo "  spec Version was $SPEC_VERSION — syncing to $VERSION"
+    sed -i "s/^Version:.*/Version:        $VERSION/" "$SCRIPT_DIR/cs9711-fingerprint.spec"
+fi
+
 # Copy spec file
 cp "$SCRIPT_DIR/cs9711-fingerprint.spec" "$HOME/rpmbuild/SPECS/"
 

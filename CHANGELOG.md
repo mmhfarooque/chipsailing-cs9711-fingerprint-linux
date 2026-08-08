@@ -7,6 +7,26 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [2.2.5] - 2026-08-08
+
+**Fedora, measured for the first time on real (virtual) hardware — two silent-failure modes fixed.**
+
+Everything below comes from a pristine Fedora 44 KDE VM with a passed-through CS9711, built to answer the questions @popy2k14's report left open in #1. The driver itself works on Fedora 44 — `fprintd` lists the scanner — but two of our own delivery paths were broken in ways that reported nothing.
+
+### Fixed
+- **The RPM was silently inert on stock Fedora.** Stock Fedora 44 ships NO `/usr/local` coverage in the dynamic linker path — `/etc/ld.so.conf` is a bare include line and `ld.so.conf.d/` holds only a pipewire entry (the `local-lib64.conf` seen on a user's box in #1 turned out to be third-party). The rpm installs the driver under `/usr/local/lib64`, so on stock Fedora the linker never resolved it: install clean, nothing works, no error. The rpm's post scriptlet now runs the same resolved-library check as the .deb postinst — if the resolved libfprint is not ours it writes `/etc/ld.so.conf.d/00-cs9711-local.conf`, refreshes the cache and re-verifies. The erase scriptlet removes the drop-in.
+- **The installer's device check misread a polkit denial as a missing device.** `fprintd` queries are polkit-gated; a session that is not local-and-active (ssh, some pkexec paths) gets *Not Authorized*, which the step-6 check treated as scanner-not-found — a hard abort AFTER the driver was correctly installed but BEFORE PAM, the update guard and the package-manager hooks were configured. That truncated state matches @popy2k14's machine exactly (working driver, no dnf5 hook, PAM done by hand) and is very likely how it got that way. The check now retries via sudo — root is implicitly authorised — before concluding anything, and the enrolment-staleness checks reuse the same output. Same lesson as v2.2.4's ldconfig bug: never let a check's own failure mode impersonate the failure it checks for.
+- **The .deb postrm now actually removes `00-cs9711-local.conf`** on remove/purge — its comment has promised that since 2.2.3 without the code doing it.
+- **`build-rpm.sh` now syncs the spec's `Version:` from the VERSION file** before building, the same way `build-arch.sh` syncs `pkgver` — this field has drifted twice before (v2.0.1, v2.1.0) when left to manual edits.
+
+### Measured on the Fedora 44 VM (for the record)
+- `install.sh` end-to-end: Fedora dependency names resolve, the fork builds clean, the v2.2.2 linker fallback fires (writes the drop-in) and the driver is the resolved library.
+- `fprintd` 1.94.5 + our libfprint fork: scanner listed, no ABI trouble, no SELinux denials under enforcing mode.
+- Fedora 44 KDE ships authselect's `with-fingerprint` feature already enabled on the default profile.
+- `libdnf5-plugin-actions` is not preinstalled — the update-guard hook depends on the installer pulling it, so a package-only install has no update protection (packages remain driver-only by design; run `install.sh` for the guard, GUI and PAM tooling).
+
+---
+
 ## [2.2.4] - 2026-08-05
 
 **The Arch fix now works on the first run — confirmed working on CachyOS with OpenCV 5.**
@@ -47,7 +67,7 @@ There is **no AppImage and cannot be one**: the whole job is patching the system
 Reported by @josepcarles, who retested v2.1.0 on CachyOS with `opencv 5.0.0-7.1`: the build completed with no errors (so the OpenCV work in v2.1.0 did its job), but enrolment still failed with *No devices available* while `lsusb` showed the scanner.
 
 ### Fixed
-- **The patched library was installed where the linker never looks.** `meson` installs under `/usr/local`, which only shadows the distro's own libfprint when `/usr/local/lib{,64}` is in the dynamic linker's search path. openSUSE lists it first in `/etc/ld.so.conf`, and Debian and Fedora reach it via drop-ins under `/etc/ld.so.conf.d/`; **Arch and CachyOS do not cover it at all** — glibc's built-in search covers `/usr/lib` and `/lib` only. So on Arch the stock libfprint kept winning, `fprintd` saw no device, and the install looked successful. *(Corrected 2026-08-08: this entry originally claimed all three list it first in `/etc/ld.so.conf` — only openSUSE does. On a real Fedora 44 install the top-level file is a bare include line and `/usr/local/lib64` resolves via a `local-lib64.conf` drop-in — measured by @popy2k14 in #1. The installer never trusts this either way: since v2.2.2 it verifies what the linker actually resolves.)*
+- **The patched library was installed where the linker never looks.** `meson` installs under `/usr/local`, which only shadows the distro's own libfprint when `/usr/local/lib{,64}` is in the dynamic linker's search path. openSUSE lists it first in `/etc/ld.so.conf` and Debian ships it via a drop-in under `/etc/ld.so.conf.d/`; **stock Fedora, Arch and CachyOS do not cover it at all** — glibc's built-in search covers `/usr/lib` and `/lib` only. So on Arch the stock libfprint kept winning, `fprintd` saw no device, and the install looked successful. *(Corrected twice, finally on 2026-08-08: this entry originally claimed openSUSE, Fedora and Debian all list it first in `/etc/ld.so.conf`. A first correction, based on a user's Fedora 44 box in #1, said Fedora covers it via a `local-lib64.conf` drop-in — but a pristine Fedora 44 KDE VM then proved that drop-in was third-party, not the distro: stock Fedora ships NO `/usr/local` coverage whatsoever, and relies on this release's fallback exactly like Arch. The installer never trusts any of this: since v2.2.2 it verifies what the linker actually resolves.)*
   - The installer and the rebuild path now check whether the **resolved** libfprint is actually ours (it carries the `cs9711` marker). If not, they add the real install directory to `/etc/ld.so.conf.d/00-cs9711-local.conf`, refresh the cache and re-verify. Reversible: `uninstall.sh` removes the file.
   - We deliberately do **not** install with `--prefix=/usr`, which would overwrite a distro-owned file that the next package update clobbers anyway.
   - Diagnostic worth knowing: run `ldd` on the resolved libfprint. Our build links OpenCV (the sigfm matcher needs it); a resolved library with **no OpenCV libraries at all** is the distro's, not ours.

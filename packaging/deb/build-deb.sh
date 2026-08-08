@@ -208,6 +208,11 @@ chmod 755 "$PKG_DIR/DEBIAN/postinst"
 cat > "$PKG_DIR/DEBIAN/postrm" << 'EOF'
 #!/bin/bash
 set -e
+# The postinst may have added a linker-path drop-in; take it with us on
+# removal (the comment in that file has promised this since 2.2.3).
+case "$1" in
+    remove|purge) rm -f /etc/ld.so.conf.d/00-cs9711-local.conf ;;
+esac
 ldconfig
 if systemctl is-active --quiet fprintd 2>/dev/null; then
     systemctl restart fprintd

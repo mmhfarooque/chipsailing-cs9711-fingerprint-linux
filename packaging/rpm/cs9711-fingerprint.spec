@@ -1,5 +1,5 @@
 Name:           cs9711-fingerprint
-Version:        2.2.4
+Version:        2.2.5
 Release:        1%{?dist}
 Summary:        Chipsailing CS9711 USB fingerprint scanner driver for Linux
 License:        LGPL-2.1-or-later AND MIT
@@ -69,6 +69,35 @@ DESTDIR=%{buildroot} meson install -C builddir
 
 %post
 ldconfig
+
+# Verify the packaged driver is the one the linker actually resolves. openSUSE
+# puts /usr/local/lib{,64} first in /etc/ld.so.conf — but STOCK FEDORA DOES NOT
+# cover /usr/local at all (measured on a pristine Fedora 44 KDE install,
+# 2026-08-08; the top-level file is a bare include and ld.so.conf.d ships only
+# a pipewire entry). Without this, the package lands where the linker never
+# looks and silently does nothing — issue #2's failure mode, on Fedora.
+CS9711_LDCONF=/etc/ld.so.conf.d/00-cs9711-local.conf
+LIBDIR=
+for d in /usr/local/lib64 /usr/local/lib; do
+    if [ -e "$d/libfprint-2.so.2" ]; then LIBDIR=$d; break; fi
+done
+resolved() { PATH=/usr/sbin:/sbin:$PATH ldconfig -p 2>/dev/null \
+    | awk '/libfprint-2\.so\.2 /{print $NF; exit}'; }
+is_ours() { r=$(resolved); [ -n "$r" ] && [ -e "$r" ] \
+    && grep -aq cs9711 "$r" 2>/dev/null; }
+if ! is_ours && [ -n "$LIBDIR" ]; then
+    echo "  Extending linker path so the packaged driver takes precedence"
+    printf '# Added by cs9711-fingerprint. Removed on uninstall.\n%%s\n' "$LIBDIR" \
+        > "$CS9711_LDCONF"
+    chmod 644 "$CS9711_LDCONF"
+    ldconfig
+fi
+if ! is_ours; then
+    echo "  WARNING: the system still resolves $(resolved) rather than the"
+    echo "           packaged driver in $LIBDIR. Fingerprint will not work."
+    echo "           https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/issues"
+fi
+
 systemctl restart fprintd 2>/dev/null || true
 
 # Enable fingerprint auth via authselect if available
@@ -83,6 +112,10 @@ echo "  Test:    fprintd-verify"
 echo "  GUI:     python3 /path/to/cs9711-manager.py"
 
 %postun
+# $1 = 0 on full erase (not upgrade): remove the linker-path drop-in we added
+if [ "$1" -eq 0 ]; then
+    rm -f /etc/ld.so.conf.d/00-cs9711-local.conf
+fi
 ldconfig
 systemctl restart fprintd 2>/dev/null || true
 
@@ -92,6 +125,14 @@ systemctl restart fprintd 2>/dev/null || true
 /usr/local/lib*/libfprint-2.so*
 
 %changelog
+* Fri Aug 08 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.5-1
+- The post scriptlet now verifies the linker actually resolves the packaged
+  driver and extends the path via /etc/ld.so.conf.d if not, matching the .deb
+  postinst. Measured on a pristine Fedora 44 KDE VM: stock Fedora ships NO
+  /usr/local coverage in its linker path, so the rpm alone was silently inert
+  there — the driver installed where the linker never looks.
+- The postun scriptlet removes the linker drop-in on full erase.
+
 * Wed Aug 05 2026 Mahmud Farooque <farooque7@gmail.com> - 2.2.4-1
 - Confirmed working on CachyOS with opencv 5.0.0-7.1 by the original reporter
 - The linker-cache refresh ran without root, so it silently did nothing:

@@ -403,14 +403,26 @@ if [ "$REAL_USER" = "root" ] && [ -n "$PKEXEC_UID" ]; then
     REAL_USER=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
 fi
 
-if fprintd-list "$REAL_USER" 2>&1 | grep -qi "CS9711\|9711\|chipsailing"; then
+# fprintd queries go through polkit, which denies sessions that are not local
+# and active — running this over ssh gets "Not Authorized", and a DENIED query
+# looks exactly like NO DEVICE to a naive grep. Measured on Fedora 44: the
+# unprivileged query printed only object paths (no device name) while the
+# daemon logged the denial naming the CS9711. So: query as the user first,
+# then retry via sudo (root is implicitly authorised) before concluding the
+# device is absent. Same lesson as the ldconfig bug — never let a check's own
+# failure mode impersonate the failure it checks for.
+FPL_OUT=$(fprintd-list "$REAL_USER" 2>&1)
+if ! printf '%s' "$FPL_OUT" | grep -qi "CS9711\|9711\|chipsailing"; then
+    FPL_OUT=$(sudo fprintd-list "$REAL_USER" 2>&1)
+fi
+if printf '%s' "$FPL_OUT" | grep -qi "CS9711\|9711\|chipsailing"; then
     ok "CS9711 scanner detected by fprintd!"
-    fprintd-list "$REAL_USER" 2>&1 | sed 's/^/    /'
+    printf '%s\n' "$FPL_OUT" | sed 's/^/    /'
 
     # Detect existing enrollment — likely stale if it pre-dates this build of
     # the patched driver, since template timing/format can differ. We don't
     # auto-delete (could destroy a working enrollment), but we tell the user.
-    if fprintd-list "$REAL_USER" 2>&1 | grep -qE '^\s*-\s*#[0-9]+:'; then
+    if printf '%s\n' "$FPL_OUT" | grep -qE '^\s*-\s*#[0-9]+:'; then
         warn "Existing enrolled fingerprint(s) detected"
         echo "       If this driver was just freshly built (or you previously"
         echo "       used an older driver), the old template will likely fail"
