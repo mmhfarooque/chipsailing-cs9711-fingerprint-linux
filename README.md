@@ -250,6 +250,10 @@ By default, GNOME Keyring requires your password to unlock (fingerprint login sk
 python3 helpers/set-empty-keyring-password.py
 ```
 
+## Optional: Auto-Unlock KDE Wallet
+
+KWallet has the same problem in reverse: it is opened by a PAM module that captures your login *password*, so a fingerprint login short-circuits past it and the wallet — and everything that depends on it, such as browser saved passwords — stays locked. [autokdewallet](https://github.com/Himalian/autokdewallet) by @Himalian solves this properly with a TPM-secured wallet password that unlocks automatically at login, fingerprint included. Recommended from a working Fedora 44 KDE setup by @popy2k14 in [#1](https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux/issues/1).
+
 ## File Structure
 
 ```
