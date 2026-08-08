@@ -411,9 +411,12 @@ fi
 # then retry via sudo (root is implicitly authorised) before concluding the
 # device is absent. Same lesson as the ldconfig bug — never let a check's own
 # failure mode impersonate the failure it checks for.
-FPL_OUT=$(fprintd-list "$REAL_USER" 2>&1)
+# The || true guards matter: this script runs under set -e, and fprintd-list
+# exits nonzero on the very authorization denial we are probing for — a bare
+# assignment would kill the whole script mid-step with no message at all.
+FPL_OUT=$(fprintd-list "$REAL_USER" 2>&1) || true
 if ! printf '%s' "$FPL_OUT" | grep -qi "CS9711\|9711\|chipsailing"; then
-    FPL_OUT=$(sudo fprintd-list "$REAL_USER" 2>&1)
+    FPL_OUT=$(sudo fprintd-list "$REAL_USER" 2>&1) || true
 fi
 if printf '%s' "$FPL_OUT" | grep -qi "CS9711\|9711\|chipsailing"; then
     ok "CS9711 scanner detected by fprintd!"
