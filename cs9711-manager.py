@@ -108,12 +108,15 @@ DISTRO_COMMON_AUTH_FILES = [os.path.basename(p) for p in PAM_FILES]
 # desktop environments and login managers across popular distros.
 SERVICE_PAM_FILES = {
     "Login screen": [
-        "sddm",                  # KDE
+        "plasmalogin",           # KDE Plasma 6.7+ — replaced sddm (Fedora 44, CachyOS)
+        "sddm",                  # KDE (Plasma 6.6 and earlier)
         "gdm-password",          # GNOME
         "gdm-fingerprint",       # GNOME (fingerprint-specific)
+        "greetd",                # greetd default service (tuigreet / regreet)
+        "cosmic-greeter",        # COSMIC, when it names its own service
         "lightdm",               # XFCE / Cinnamon / Mint default
         "lxdm",                  # LXDE
-        "login",                 # TTY login fallback
+        "login",                 # TTY login, and COSMIC's greetd service = login
     ],
     "Lock screen": [
         "kde-fingerprint",       # KDE Plasma 6 — dedicated fingerprint stack (native)
@@ -477,12 +480,42 @@ def pam_toggle_cmd(location, enable, max_tries=7, timeout=30):
     return f'''set -u
 ETC={PAM_DIR}; VENDOR={VENDOR_PAM_DIR}; MARK="{PAM_MARK}"; ENABLE={en}
 INS="{ins}"
-has_vendor_fp(){{ [ -f "$VENDOR/$1" ] && grep -qE '^[^#]*pam_fprintd\\.so' "$VENDOR/$1"; }}
+# Native = a distro-shipped fprintd line (never one of ours, which carry MARK),
+# reachable through include/substack. Fedora puts kde-fingerprint in /etc and
+# exposes sudo's fingerprint only via system-auth, so checking the vendor dir
+# alone missed both. Mirrors install.sh.
+has_vendor_fp(){{ _hvf "$1" 0; }}
+_hvf(){{ s="$1"; depth="$2"; [ "$depth" -ge 3 ] && return 1
+  for f in "$ETC/$s" "$VENDOR/$s"; do
+    [ -f "$f" ] || continue
+    grep -E '^[^#]*pam_fprintd\\.so' "$f" 2>/dev/null | grep -qv "$MARK" && return 0
+    for t in $(awk '$1=="auth" && ($2=="include"||$2=="substack"){{print $3}}' "$f"); do
+      _hvf "$t" $((depth+1)) && return 0
+    done
+  done
+  return 1; }}
 ensure_copy(){{ [ -f "$ETC/$1" ] || {{ [ -f "$VENDOR/$1" ] && cp -a "$VENDOR/$1" "$ETC/$1"; }}; }}
 strip_ours(){{ [ -f "$ETC/$1" ] && {{ grep -v "$MARK" "$ETC/$1" > "$ETC/$1.tmp" && mv "$ETC/$1.tmp" "$ETC/$1"; }}; true; }}
+# Placement is a safety property: 'sufficient' short-circuits everything below,
+# so the line must sit AFTER required/requisite pre-checks (pam_securetty,
+# pam_nologin) and immediately BEFORE the include of the common stack. The old
+# code fell back to line 1, which on Arch put fingerprint ahead of pam_nologin
+# and let a touch bypass a login lockout. Mirrors install.sh.
 add_fp(){{ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; strip_ours "$1"
-  awk -v ins="$INS" '!d && $1=="auth" && /common-auth|system-auth|system-login|system-local-login/ {{print ins; d=1}} {{print}} END{{if(!d)exit 3}}' "$ETC/$1" > "$ETC/$1.tmp" \\
-    || awk -v ins="$INS" 'NR==1{{print; print ins; next}} {{print}}' "$ETC/$1" > "$ETC/$1.tmp"
+  extra=""
+  # plasmalogin has no dedicated fingerprint service, so it also gets the
+  # instant-password line (pam_unix first) that install.sh writes there.
+  [ "$1" = "plasmalogin" ] && extra="auth\\tsufficient\\tpam_unix.so\\ttry_first_pass likeauth nullok\\t$MARK"
+  awk -v ins="$INS" -v extra="$extra" '
+    {{ lines[NR]=$0
+       if (!anchor && (($1=="@include" && $2 ~ /auth/) ||
+                       ($1=="auth" && ($2=="include" || $2=="substack")))) anchor=NR
+       if ($1=="auth" && ($2=="required" || $2=="requisite" || $2 ~ /^\\[/)) lastreq=NR }}
+    END{{ if (anchor) pos=anchor-1; else if (lastreq) pos=lastreq;
+          else pos=(lines[1] ~ /^#/) ? 1 : 0
+          for (i=1;i<=NR;i++) {{ if (i==pos+1) {{ if (extra!="") print extra; print ins }} print lines[i] }}
+          if (pos>=NR) {{ if (extra!="") print extra; print ins }} }}' \\
+    "$ETC/$1" > "$ETC/$1.tmp" || return 0
   mv "$ETC/$1.tmp" "$ETC/$1"; chmod 644 "$ETC/$1"; }}
 revert_vendor(){{ [ -f "$ETC/$1" ] && grep -q "$MARK" "$ETC/$1" && rm -f "$ETC/$1"; true; }}
 remove_fp(){{ [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/$1" || return 0; strip_ours "$1"
