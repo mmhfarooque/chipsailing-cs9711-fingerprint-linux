@@ -230,21 +230,42 @@ add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/
 enable_loc(){ local native='' s; for s in "$@"; do has_vendor_fp "$s" && native=x; done
   [ -n "$native" ] && return 0
   for s in "$@"; do [ -f "$ETC/$s" ] || [ -f "$VENDOR/$s" ] || continue; add_fp "$s"; done; }
-# plasmalogin (Plasma 6.7+ replaced sddm; seen on Fedora 44 KDE) has no
-# common-auth anchor and starts with pam_selinux_permit, which must stay
-# first. Insertion recipe verified by @popy2k14 on Fedora 44 (#1): typed
-# password authenticates instantly via pam_unix, empty/failed password
-# falls through to fingerprint — plasmalogin has no parallel prompt yet.
+# plasmalogin — Plasma 6.7+ replaced sddm with it, and it has no dedicated
+# fingerprint service of its own yet, so the line has to go into the login
+# stack itself. Insertion recipe verified by @popy2k14 on Fedora 44 (#1):
+# typed password authenticates instantly via pam_unix, an empty or failed
+# password falls through to fingerprint (plasmalogin has no parallel prompt).
+#
+# The anchor is computed, NOT the literal pam_selinux_permit line the first
+# version used: that module is Fedora/SELinux-only, so on Arch and CachyOS
+# the awk matched nothing, exited 3, and the function silently did nothing —
+# fingerprint login was never configured there at all (measured on CachyOS
+# 2026-08-09, whose plasmalogin is just an include of system-login).
+# Placement rule is the same as add_fp: after any required/requisite
+# pre-checks, immediately before the include of the common stack.
 add_fp_plasmalogin(){ ensure_copy plasmalogin; local f="$ETC/plasmalogin"
   [ -f "$f" ] || return 0; grep -q "$MARK" "$f" && return 0
   has_vendor_fp plasmalogin && return 0
-  awk -v m="$MARK" '{print}
-    !d && /^[^#]*pam_selinux_permit\.so/ {
-      print "auth\tsufficient\tpam_unix.so\ttry_first_pass likeauth nullok\t" m
-      print "auth\tsufficient\tpam_fprintd.so\tmax-tries=5 timeout=10\t" m
-      d=1 }
-    END{if(!d) exit 3}' "$f" > "$f.tmp" || { rm -f "$f.tmp"; return 0; }
-  mv "$f.tmp" "$f"; chmod 644 "$f"; }
+  awk -v m="$MARK" '
+    { lines[NR]=$0
+      if (!anchor && (($1=="@include" && $2 ~ /auth/) ||
+                      ($1=="auth" && ($2=="include" || $2=="substack")))) anchor=NR
+      if ($1=="auth" && ($2=="required" || $2=="requisite" ||
+                         $2 ~ /^\[/)) lastreq=NR }
+    END{ if (anchor) pos=anchor-1; else if (lastreq) pos=lastreq;
+         else pos=(lines[1] ~ /^#/) ? 1 : 0
+         ins1="auth\tsufficient\tpam_unix.so\ttry_first_pass likeauth nullok\t" m
+         ins2="auth\tsufficient\tpam_fprintd.so\tmax-tries=5 timeout=10\t" m
+         for (i=1;i<=NR;i++) { if (i==pos+1) { print ins1; print ins2 } print lines[i] }
+         if (pos>=NR) { print ins1; print ins2 } }' "$f" > "$f.tmp" \
+    || { rm -f "$f.tmp"; return 0; }
+  mv "$f.tmp" "$f"; chmod 644 "$f"
+  if grep -qE 'pam_(kwallet|gnome_keyring)' "$f" 2>/dev/null; then
+    echo "  NOTE: plasmalogin also unlocks a keyring/wallet. Fingerprint login" >&2
+    echo "        skips that step, so saved passwords may need unlocking by hand." >&2
+    echo "        Fix: KDE -> github.com/Himalian/autokdewallet, GNOME -> an" >&2
+    echo "        empty keyring password (helpers/set-empty-keyring-password.py)." >&2
+  fi; }
 add_fp_plasmalogin
 # gdm-password is deliberately NOT in either list. It carries the keyring
 # capture (pam_gnome_keyring auth), and a 'sufficient' fprintd line ahead of
