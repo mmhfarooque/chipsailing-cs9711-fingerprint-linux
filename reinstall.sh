@@ -106,7 +106,7 @@ if [ -e "$INSTALLED_DIR/libfprint-2.so.2" ]; then
     sudo mkdir -p "$CACHE_DIR"
     sudo cp -a "$INSTALLED_DIR"/libfprint-2.so* "$CACHE_DIR"/ 2>/dev/null || true
     echo "$INSTALLED_DIR" | sudo tee "$CACHE_DIR/install-dir" >/dev/null
-    TYPELIB=$(find /usr/local -name 'FPrint-2.0.typelib' 2>/dev/null | head -1)
+    TYPELIB=$(find /usr/local -name 'FPrint-2.0.typelib' -print -quit 2>/dev/null || true)
     if [ -n "$TYPELIB" ]; then
         sudo cp -a "$TYPELIB" "$CACHE_DIR"/ 2>/dev/null || true
         dirname "$TYPELIB" | sudo tee "$CACHE_DIR/typelib-dir" >/dev/null
