@@ -110,7 +110,7 @@ SERVICE_PAM_FILES = {
     "Login screen": [
         "plasmalogin",           # KDE Plasma 6.7+ — replaced sddm (Fedora 44, CachyOS)
         "sddm",                  # KDE (Plasma 6.6 and earlier)
-        "gdm-password",          # GNOME
+#        "gdm-password",          # GNOME
         "gdm-fingerprint",       # GNOME (fingerprint-specific)
         "greetd",                # greetd default service (tuigreet / regreet)
         "cosmic-greeter",        # COSMIC, when it names its own service
@@ -123,7 +123,7 @@ SERVICE_PAM_FILES = {
         "kscreenlocker",         # KDE Plasma 6
         "kscreenlocker_greet",   # KDE Plasma 6 (alt)
         "kde",                   # KDE generic
-        "gdm-password",          # GNOME (also handles unlock)
+        "gdm-fingerprint",       # GNOME (also handles unlock)
         "cinnamon-screensaver",  # Cinnamon (Mint)
         "mate-screensaver",      # MATE
         "xfce4-screensaver",     # XFCE
