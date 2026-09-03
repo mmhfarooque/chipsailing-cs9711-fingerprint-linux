@@ -180,8 +180,14 @@ add_fp(){ ensure_copy "$1"; [ -f "$ETC/$1" ] || return 0; grep -q "$MARK" "$ETC/
 enable_loc(){ local native='' s; for s in "$@"; do has_vendor_fp "$s" && native=x; done
   [ -n "$native" ] && return 0
   for s in "$@"; do [ -f "$ETC/$s" ] || [ -f "$VENDOR/$s" ] || continue; add_fp "$s"; done; }
-enable_loc sddm gdm-fingerprint gdm-password lightdm lxdm
-enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-password cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+# gdm-password is deliberately excluded: it carries the pam_gnome_keyring
+# auth capture, and a 'sufficient' fprintd line ahead of that short-circuits
+# the stack on a successful touch, so the keyring never gets the password and
+# every saved credential looks lost. GDM's own fingerprint path is
+# gdm-fingerprint, for both login and unlock, so nothing is lost by leaving
+# gdm-password alone.
+enable_loc sddm gdm-fingerprint lightdm lxdm
+enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
 enable_loc sudo sudo-i
 enable_loc polkit-1 polkit-1-kde-1
 for cf in common-auth common-auth-pc; do
