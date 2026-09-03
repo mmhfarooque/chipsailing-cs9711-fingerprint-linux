@@ -2,13 +2,15 @@
 Type=Application
 Name=CS9711 Fingerprint Manager
 Comment=Configure Chipsailing CS9711 fingerprint scanner
-# NOTE: This is a template. Run ./setup-gui.sh (or ./install.sh) to install with
-# the correct absolute paths — both Exec and Icon are rewritten with $SCRIPT_DIR
-# so the icon renders without depending on the user's icon theme (matters on
-# KDE Breeze / Mint-Y / MATE / XFCE etc., where Adwaita symbolic names like
-# auth-fingerprint-symbolic don't resolve and fall back to the blank glyph).
+# NOTE: This is a template. Run ./setup-gui.sh (or ./install.sh) to install for
+# real — both Exec is rewritten with the absolute $SCRIPT_DIR path, and the SVG
+# is copied into ~/.local/share/icons/hicolor/scalable/apps/ so Icon can name it
+# by theme name below. That's deliberate: an absolute-path Icon= has to be
+# rasterized ad hoc by whatever loads it (gdk-pixbuf's SVG loader, not always
+# present), while a themed icon name resolves through GTK's icon theme lookup,
+# which renders reliably across KDE Breeze / Mint-Y / MATE / XFCE / GNOME alike.
 Exec=python3 cs9711-manager.py
-Icon=assets/cs9711-manager.svg
+Icon=cs9711-manager
 Terminal=false
 Categories=Settings;HardwareSettings;System;
 Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;

@@ -43,13 +43,24 @@ echo "[3/3] Creating desktop shortcut..."
 DESKTOP_FILE="$HOME/.local/share/applications/cs9711-manager.desktop"
 mkdir -p "$HOME/.local/share/applications"
 
+# Install into the icon theme and reference by name rather than by absolute
+# path. Some app-grid/taskbar icon renderers rasterize an absolute-path SVG
+# Icon= through gdk-pixbuf's SVG loader, which isn't reliably present on
+# every distro/session — a themed icon name goes through GTK's icon theme
+# lookup instead, which is what actually renders reliably everywhere.
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$ICON_DIR"
+cp "$SCRIPT_DIR/assets/cs9711-manager.svg" "$ICON_DIR/cs9711-manager.svg"
+command -v gtk-update-icon-cache &>/dev/null && \
+    gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Type=Application
 Name=CS9711 Fingerprint Manager
 Comment=Configure Chipsailing CS9711 fingerprint scanner
 Exec=python3 $SCRIPT_DIR/cs9711-manager.py
-Icon=$SCRIPT_DIR/assets/cs9711-manager.svg
+Icon=cs9711-manager
 Terminal=false
 Categories=Settings;HardwareSettings;System;
 Keywords=fingerprint;scanner;cs9711;biometric;chipsailing;

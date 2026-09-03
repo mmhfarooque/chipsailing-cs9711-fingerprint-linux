@@ -30,6 +30,8 @@ AUTHOR_URL = "https://github.com/mmhfarooque"
 PROJECT_URL = "https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux"
 USB_ID = "2541:0236"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(SCRIPT_DIR, "assets")
+APP_ICON_NAME = "cs9711-manager"  # basename of assets/cs9711-manager.svg
 DRIVER_DIR = os.path.join(SCRIPT_DIR, "libfprint-CS9711")
 CS9711_SRC = os.path.join(DRIVER_DIR, "libfprint", "drivers", "cs9711", "cs9711.c")
 
@@ -181,6 +183,20 @@ def install_css():
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
     install_css._done = True
+
+
+def register_app_icon():
+    """Point the icon theme at assets/ so Adw.AboutDialog's application_icon
+    (an icon *name*, resolved through GtkIconTheme — not a file path) can find
+    the shipped SVG. The app isn't installed into a hicolor theme directory,
+    so without this the lookup finds nothing and the About screen falls back
+    to a generic/missing icon.
+    """
+    display = Gdk.Display.get_default()
+    if display is None or getattr(register_app_icon, "_done", False):
+        return
+    Gtk.IconTheme.get_for_display(display).add_search_path(ASSETS_DIR)
+    register_app_icon._done = True
 
 
 def pick_icon(*names):
@@ -584,6 +600,7 @@ class CS9711Window(Adw.ApplicationWindow):
         self._enroll_cancel = False
 
         install_css()
+        register_app_icon()
 
         # Main layout
         self.toolbar_view = Adw.ToolbarView()
@@ -1788,7 +1805,7 @@ true''')
         """
         fields = dict(
             application_name="CS9711 Fingerprint Manager",
-            application_icon=APP_ID,
+            application_icon=APP_ICON_NAME,
             version=APP_VERSION,
             developer_name=APP_AUTHOR,
             # libadwaita renders "Name <mail>" as a mailto link in the credits
