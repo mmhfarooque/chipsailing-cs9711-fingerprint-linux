@@ -200,6 +200,26 @@ def pick_icon(*names):
     return names[-1]
 
 
+def max_content_height():
+    """Cap for the scrolled content's natural height: most of the primary
+    monitor's work area.
+
+    Paired with propagate-natural-height on the scroller, this lets the
+    window size itself to whatever the active theme and font actually
+    render (so the dashboard never needs to scroll on an ordinary screen)
+    while still degrading to scrolling instead of requesting a window
+    taller than the display when fonts are large or the screen is small.
+    """
+    display = Gdk.Display.get_default()
+    if display is None:
+        return 900
+    monitors = display.get_monitors()
+    if monitors.get_n_items() == 0:
+        return 900
+    geometry = monitors.get_item(0).get_geometry()
+    return max(480, int(geometry.height * 0.85))
+
+
 # Resolved once: the app's own identity icon, and the state icons.
 def icon_fingerprint():
     return pick_icon("auth-fingerprint-symbolic", "fingerprint-symbolic",
@@ -574,10 +594,19 @@ class CS9711Window(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_title(f"CS9711 Fingerprint Manager v{APP_VERSION}")
-        # Wide enough for the two-column layout; the breakpoint below collapses
-        # to a single column when the window (or the screen) is narrower.
-        self.set_default_size(1120, 720)
-        self.set_size_request(360, 480)
+        # No hardcoded default size: a fixed pixel guess drifts wrong under a
+        # different theme, font size, or icon set, since those all change how
+        # tall/wide the real widgets end up. Leaving default size unset makes
+        # GTK size the window from the actual built content's natural size
+        # instead (see the scroller's propagate-natural-* below) — correct by
+        # construction under any theme/font, not just the one this was tuned on.
+        #
+        # Floor must clear the single-column layout's real minimum width (measured
+        # ~380px for a column's own content, +32px for the page's side margins) or
+        # a tiling WM / half-tile snap / manual shrink clips controls: horizontal
+        # scrolling is off by design, so anything narrower than the content can't
+        # fall back to a scrollbar.
+        self.set_size_request(440, 600)
 
         # Enroll process tracking
         self._enroll_process = None
@@ -615,8 +644,17 @@ class CS9711Window(Adw.ApplicationWindow):
 
         # Scrollable content. Horizontal scrolling is off: the breakpoint
         # guarantees the content reflows instead of overflowing sideways.
+        #
+        # propagate-natural-* makes the scroller report the real content's
+        # measured size (theme/font-correct) instead of a small fixed one, so
+        # the window sizes itself to fit on present() — max-content-height
+        # caps that growth to the screen's work area so it still scrolls
+        # rather than opening taller than the display.
         scroll = Gtk.ScrolledWindow(vexpand=True,
                                     hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_propagate_natural_width(True)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_max_content_height(max_content_height())
         self.toolbar_view.set_content(scroll)
 
         # Clamp keeps the dashboard readable on ultrawide screens rather than
