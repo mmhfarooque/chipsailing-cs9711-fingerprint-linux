@@ -13,12 +13,18 @@ pkgrel=1
 pkgdesc="Chipsailing CS9711 USB fingerprint scanner driver with 1500ms retry patch and GTK4 GUI manager"
 arch=('x86_64' 'aarch64')
 url="https://github.com/mmhfarooque/chipsailing-cs9711-fingerprint-linux"
-license=('LGPL-2.1-or-later' 'MIT')
-depends=('fprintd' 'libfprint' 'glib2' 'libgusb')
-optdepends=('python-gobject: GUI manager'
+license=('LGPL-2.1-or-later')
+depends=('glib2' 'libgusb' 'opencv')
+
+provides=('libfprint' 'libfprint-2.so=2-64')
+
+conflicts=('libfprint' 'libfprint-cs9711-rebase-git')
+
+optdepends=('fprintd: fingerprint enrollment and verification'
+            'python-gobject: GUI manager'
             'gtk4: GUI manager'
             'libadwaita: GUI manager')
-makedepends=('git' 'meson' 'ninja' 'pixman' 'cairo' 'openssl' 'opencv'
+makedepends=('git' 'meson' 'ninja' 'pixman' 'cairo' 'openssl'
              'doctest' 'gobject-introspection')
 source=("git+https://github.com/archeYR/libfprint-CS9711.git")
 sha256sums=('SKIP')
