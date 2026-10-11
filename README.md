@@ -201,7 +201,18 @@ The patch is in `patches/cs9711-retry-delay-1500ms.patch`.
 
 Since v2.0.2, fingerprint is wired **per service**, not globally: each auth location (login screen, lock screen, `sudo`, polkit) gets the `pam_fprintd` line in its **own** PAM service file, tagged `# cs9711-managed`, and the GUI's four switches control them independently. Nothing is ever written to the shared `common-auth`/`system-auth` stack — which also means the tool works the same on **Arch/CachyOS**, where `/etc/pam.d/common-auth` does not exist at all (v2.1.0 fixed “Apply PAM Settings” accordingly, issue #1).
 
-The line is only ever added as `sufficient`, with the full vendor stack preserved — **password authentication can never be locked out**, and every change is reversible (toggling off removes only the managed line/override).
+For shared password/fingerprint services, the line is only ever added as `sufficient`, with the full vendor stack preserved — **password authentication can never be locked out**, and every change is reversible (toggling off removes only the managed line/override).
+
+**Omarchy Shell:** the installer and GUI's **Lock screen** switch configure
+`/etc/pam.d/omarchy-lock-fingerprint` when Omarchy Shell is installed or its
+password PAM service exists. This dedicated service uses `required pam_fprintd.so`
+and `account include system-local-login`; the separate password service is preserved.
+Disabling the switch removes the managed fingerprint service entirely. Attempts and
+timeout are applied to this service too. Existing unmarked settings are preserved by the installer. The GUI can adopt
+the standard Omarchy fingerprint-only stack, saving the original as
+`omarchy-lock-fingerprint.cs9711-backup` before the first change. Custom PAM
+stacks are preserved and rejected by the toggle.
+This integration targets Omarchy Shell, not older Omarchy releases using Hyprlock.
 
 Defaults:
 - **max-tries=7** — 7 fingerprint attempts before falling back to password (default is 1)
