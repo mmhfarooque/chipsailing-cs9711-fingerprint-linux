@@ -9,6 +9,7 @@ driver maintenance. Uses GTK4 + libadwaita for native GNOME look.
 import gi
 import glob
 import logging
+import shutil
 import os
 import re
 import shlex
@@ -119,6 +120,7 @@ SERVICE_PAM_FILES = {
         "login",                 # TTY login, and COSMIC's greetd service = login
     ],
     "Lock screen": [
+        "omarchy-lock-fingerprint",  # Omarchy Shell dedicated fingerprint flow
         "kde-fingerprint",       # KDE Plasma 6 — dedicated fingerprint stack (native)
         "kscreenlocker",         # KDE Plasma 6
         "kscreenlocker_greet",   # KDE Plasma 6 (alt)
@@ -436,6 +438,9 @@ def get_pam_auth_locations():
 
     locations = {}
     for name, files in SERVICE_PAM_FILES.items():
+        if name == "Lock screen" and _is_omarchy_lock():
+            locations[name] = _has_fprintd_in_stack("omarchy-lock-fingerprint")
+            continue
         enabled = False
         any_file_present = False
         for f in files:
@@ -457,6 +462,33 @@ def run_as_root(cmd_str):
     return run_cmd(["pkexec", "bash", "-c", cmd_str], timeout=60)
 
 
+def _is_omarchy_lock():
+    """Omarchy Shell uses its own password and fingerprint PAM services."""
+    return (os.path.exists(_pam_path("omarchy-lock-password"))
+            or shutil.which("omarchy-shell") is not None)
+
+
+def _omarchy_lock_cmd(enable, max_tries, timeout):
+    # Remove the whole managed service on disable: the shell checks file
+    # existence, so leaving an empty PAM stack would still arm authentication.
+    return f'''set -eu
+FILE={PAM_DIR}/omarchy-lock-fingerprint
+MARK="{PAM_MARK}"
+if [ -e "$FILE" ] && ! grep -qF "$MARK" "$FILE"; then
+  echo "Omarchy fingerprint PAM is unmanaged; refusing to overwrite or remove it." >&2
+  exit 1
+fi
+if [ "{int(bool(enable))}" = 1 ]; then
+  umask 022
+  printf '%s\\n' '#%PAM-1.0' "$MARK" \\
+    'auth required pam_fprintd.so max-tries={int(max_tries)} timeout={int(timeout)}' \\
+    'account include system-local-login' > "$FILE"
+  chmod 644 "$FILE"
+else
+  rm -f "$FILE"
+fi'''
+
+
 def pam_toggle_cmd(location, enable, max_tries=7, timeout=30):
     """Build a root bash script that enables/disables fingerprint for one auth
     location by managing that service's own PAM file — independently of the others.
@@ -471,6 +503,8 @@ def pam_toggle_cmd(location, enable, max_tries=7, timeout=30):
     The full vendor stack (incl. the password path) is always preserved, and the
     fprintd line is only ever 'sufficient', so password auth never breaks.
     """
+    if location == "Lock screen" and _is_omarchy_lock():
+        return _omarchy_lock_cmd(enable, max_tries, timeout)
     services = SERVICE_PAM_FILES.get(location, [])
     svc_list = " ".join(s for s in services if re.match(r"^[A-Za-z0-9._-]+$", s))
     fp_opts = f"max-tries={int(max_tries)} timeout={int(timeout)}"

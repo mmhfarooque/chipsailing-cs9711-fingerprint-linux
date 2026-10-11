@@ -297,7 +297,19 @@ greetd_auth_service(){
 }
 GREETD_SVC=$(greetd_auth_service || true)
 enable_loc sddm gdm-fingerprint lightdm lxdm greetd ${GREETD_SVC:-}
-enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+# Omarchy Shell starts a separate fingerprint-only PAM conversation; login
+# and hyprlock PAM settings are not consulted by this lock screen.
+if [ -f "$ETC/omarchy-lock-password" ] || command -v omarchy-shell >/dev/null 2>&1; then
+  if [ ! -e "$ETC/omarchy-lock-fingerprint" ]; then
+    umask 022
+    printf '%s\n' '#%PAM-1.0' "$MARK" \
+      'auth required pam_fprintd.so max-tries=7 timeout=30' \
+      'account include system-local-login' > "$ETC/omarchy-lock-fingerprint"
+    chmod 644 "$ETC/omarchy-lock-fingerprint"
+  fi
+else
+  enable_loc kde-fingerprint kscreenlocker kscreenlocker_greet kde gdm-fingerprint cinnamon-screensaver mate-screensaver xfce4-screensaver light-locker
+fi
 enable_loc sudo sudo-i
 enable_loc polkit-1 polkit-1-kde-1
 # Per-service files are authoritative: drop any global fprintd from the common stack.
