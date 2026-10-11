@@ -475,8 +475,24 @@ def _omarchy_lock_cmd(enable, max_tries, timeout):
 FILE={PAM_DIR}/omarchy-lock-fingerprint
 MARK="{PAM_MARK}"
 if [ -e "$FILE" ] && ! grep -qF "$MARK" "$FILE"; then
-  echo "Omarchy fingerprint PAM is unmanaged; refusing to overwrite or remove it." >&2
-  exit 1
+  # Adopt only the standard fingerprint-only stack. Preserve custom PAM
+  # modules/control flags rather than silently changing their security policy.
+  if ! awk '
+    /^[[:space:]]*(#|$)/ {{ next }}
+    $1=="auth" && $2=="required" && $3=="pam_fprintd.so" {{
+      for (i=4; i<=NF; i++)
+        if ($i !~ /^(max-tries|timeout)=[0-9]+$/) bad=1
+      auth++; next
+    }}
+    $1=="account" && $2=="include" && $3=="system-local-login" && NF==3 {{ account++; next }}
+    {{ bad=1 }}
+    END {{ exit (bad || auth!=1 || account!=1) }}' "$FILE"; then
+    echo "Custom Omarchy fingerprint PAM detected; refusing to change it." >&2
+    exit 1
+  fi
+  if [ ! -e "$FILE.cs9711-backup" ]; then
+    cp -p "$FILE" "$FILE.cs9711-backup"
+  fi
 fi
 if [ "{int(bool(enable))}" = 1 ]; then
   umask 022

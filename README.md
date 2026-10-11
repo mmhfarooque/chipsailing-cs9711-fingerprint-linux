@@ -208,9 +208,10 @@ For shared password/fingerprint services, the line is only ever added as `suffic
 password PAM service exists. This dedicated service uses `required pam_fprintd.so`
 and `account include system-local-login`; the separate password service is preserved.
 Disabling the switch removes the managed fingerprint service entirely. Attempts and
-timeout are applied to this service too. Existing unmarked manual/vendor settings
-are preserved by the installer; the GUI refuses to overwrite or remove them.
-To let the GUI manage a manual configuration, back it up and remove it first.
+timeout are applied to this service too. Existing unmarked settings are preserved by the installer. The GUI can adopt
+the standard Omarchy fingerprint-only stack, saving the original as
+`omarchy-lock-fingerprint.cs9711-backup` before the first change. Custom PAM
+stacks are preserved and rejected by the toggle.
 This integration targets Omarchy Shell, not older Omarchy releases using Hyprlock.
 
 Defaults:
